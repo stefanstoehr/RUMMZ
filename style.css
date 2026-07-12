@@ -1,0 +1,689 @@
+/* 1. GRUNDLAYOUT & GLOBALE STILE */
+:root {
+  --color-text: #333;
+  --color-bg: #f8f9fa;
+  --color-white: #fff;
+  --color-border: #dee2e6;
+  --color-border-light: #f1f3f5;
+  --color-border-medium: #ced4da;
+  --color-text-muted: #495057;
+  --color-text-light: #adb5bd;
+  --color-text-lighter: #6c757d;
+  --color-danger: #dc3545;
+  --color-success: #28a745;
+  --color-success-hover: #42db63;
+  --color-bg-light: #e9ecef;
+  --color-shadow: rgba(0,0,0,0.05);
+  --color-shadow-hover: rgba(0,0,0,0.1);
+}
+
+/* 0. LOADING OVERLAY */
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.3)), url('assets/RUMMZlanding.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  opacity: 1;
+  transition: opacity 0.5s ease-out;
+}
+
+.loading-overlay.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2rem;
+  text-align: center;
+}
+
+.landing-image {
+  display: none;
+}
+
+.loading-spinner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.spinner {
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-top: 4px solid #fff;
+  border-radius: 50%;
+  width: 50px;
+  height: 50px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.loading-spinner p {
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin: 0;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+  color: var(--color-text);
+  background-color: var(--color-bg);
+}
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+header {
+  background: #fff;
+  border-bottom: 1px solid #dee2e6;
+  padding: 0.3rem 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative; /* Make it a positioning context */
+}
+
+.header-logo {
+  display: flex;
+  align-items: center;
+}
+
+.header-logo-svg {
+  height: 2rem;
+}
+
+.header-subtitle {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #6c757d;
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* NEW FOOTER STYLES */
+footer {
+  background: #fff;
+  border-top: 1px solid #dee2e6;
+  padding: 0.75rem 1.5rem;
+  color: #495057;
+  font-size: 0.8rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.footer-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5em;
+  flex-wrap: wrap;
+}
+
+.footer-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* 1.1 HEADER & FOOTER ICONS */
+
+#header-logo-link {
+  display: flex;
+  align-items: center;
+  transition: transform 0.2s ease-in-out;
+}
+
+#header-logo-link:hover {
+  transform: scale(1.05);
+  color: #000;
+}
+
+.header-actions a {
+  color: #495057;
+  text-decoration: none;
+  transition: color 0.2s, transform 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 1rem;
+}
+
+footer a {
+  color: #495057;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.header-actions a:hover {
+  transform: scale(1.1);
+}
+
+footer a:hover {
+  text-decoration: underline;
+}
+
+#youtube-link:hover, #account-link:hover, #info-card-link:hover {
+  color: #000;
+}
+
+main {
+  flex: 1;
+  padding: 1.5rem;
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+  min-height: 0;
+}
+
+/* 2. GRID & SCROLLING */
+.grid-content {
+  display: flex;
+  gap: 1.5rem;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  padding-top: 0.5rem; /* Space for card hover effect */
+  padding-bottom: 1rem;
+  scrollbar-width: thin;
+  scrollbar-color: #ced4da #f1f3f5;
+}
+
+.grid-content::-webkit-scrollbar {
+  height: 8px;
+}
+
+.grid-content::-webkit-scrollbar-track {
+  background: #f1f3f5;
+  border-radius: 4px;
+}
+
+.grid-content::-webkit-scrollbar-thumb {
+  background: #ced4da;
+  border-radius: 4px;
+}
+
+#scroll-left, #scroll-right {
+  background: transparent;
+  border: 1px solid #ced4da;
+  color: #495057;
+  border-radius: 50%;
+  cursor: pointer;
+  width: 40px;
+  height: 40px;
+  font-size: 1.5rem;
+  align-self: center;
+  transition: background-color 0.2s, box-shadow 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+#scroll-left:hover, #scroll-right:hover {
+  background-color: #f1f3f5;
+  box-shadow: 0 0 5px rgba(0,0,0,0.1);
+}
+
+/* 3. KARTEN-STILE (BASE & CARD) */
+
+.base-card {
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px var(--color-shadow);
+  flex: 0 0 320px;
+  max-width: 100%;
+  height: 100%;
+  overflow-y: scroll;
+  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.info {
+  position: sticky;
+  left: 0;
+  top: 0.5rem;
+  align-self: flex-start;
+  z-index: 20;
+  flex-shrink: 0;
+}
+
+.card:hover,
+.info:hover,
+.preview:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 4px 12px var(--color-shadow-hover);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #dee2e6;
+  position: sticky;
+  top: 0;
+  background-color: #fff;
+  z-index: 10;
+}
+
+.card-title {
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.card-title-total {
+  font-size: 0.8em;
+  font-weight: 500;
+  color: #adb5bd;
+  margin-left: 0.4em;
+}
+
+.card-details, .card-location {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem;
+  background-color: #fff;
+  border-bottom: 1px solid #dee2e6;
+}
+/*
+#bohrtiefen {
+    min-height: 400px;
+}
+*/
+.card-map {
+  width: 100%;
+  height: 200px;
+  position: relative;
+  z-index: 0;
+  transform: translateZ(0);
+}
+
+.card-map .map-overlay-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.card-map .map-icon-stack {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+  pointer-events: auto;
+}
+
+.card-map .map-icon-stack i {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.35rem;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(2px);
+  color: #495057;
+  font-size: 0.95rem;
+  line-height: 1;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-map .map-icon-stack i:hover,
+.card-map .map-icon-stack i.active {
+  color: #0d6efd;
+  transform: scale(1.08);
+  box-shadow: 0 4px 12px rgba(13,110,253,0.2);
+}
+
+.card-map .map-attribution {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(2px);
+  border-radius: 0;
+  padding: 0;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  color: #495057;
+  pointer-events: none;
+  z-index: 11;
+}
+
+.card-map .map-attribution a {
+  color: inherit;
+  text-decoration: none;
+  pointer-events: auto;
+}
+
+.card-map .map-attribution a:hover {
+  text-decoration: underline;
+}
+
+.location-input-group {
+  flex: 1 1 0;
+}
+
+.nhn-group, .height-group, .epsg-group {
+  flex: 0 0 80px; /* Make NHN, height and EPSG fields narrower */
+}
+
+.card-layer {
+  padding: 1rem 1rem 0 0.75rem;
+  border-left: 4px solid #dee2e6; /* Default color, JS will override */
+  transition: border-color 0.2s;
+}
+
+.layers-container {
+  padding-bottom: 1rem;
+}
+
+.layer-separator {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 0.75rem;
+  margin: 1.25rem 0.75rem 1.25rem;
+  background: transparent;
+}
+
+/* 4. FORMULARELEMENTE & BUTTONS */
+label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-bottom: 0.4rem;
+  color: #495057;
+}
+
+.layer-inputs {
+  display: flex;
+  gap: 0.75rem;
+}
+
+input[type="text"], input[type="number"], select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+input[readonly] {
+  background-color: #e9ecef;
+  cursor: not-allowed;
+}
+
+input[type="text"]:focus, input[type="number"]:focus, select:focus {
+  outline: none;
+  border-color: #80bdff;
+  box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+}
+
+.layer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.layer-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.layer-header strong {
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.color-picker-group {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-wrap: nowrap;
+}
+
+.color-swatch-row {
+  display: flex;
+  gap: 0.16rem;
+  flex-wrap: nowrap;
+  margin-top: 0.5rem;
+}
+
+.color-swatch {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 50%;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.color-swatch:hover {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.layer-color-picker {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  opacity: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+}
+
+
+/* Delete Buttons */
+.delete-layer-btn, .delete-card-btn {
+  background: transparent;
+  border: 1px solid #ced4da;
+  color: #adb5bd;
+  border-radius: 999px;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  flex: 0 0 28px;
+  aspect-ratio: 1 / 1;
+  font-size: 1.6rem;
+  font-weight: 300;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+  box-sizing: border-box;
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+  top: -0.4rem;
+}
+
+.delete-card-btn:hover, .delete-layer-btn:hover {
+  background-color: #dc3545;
+  border-color: #dc3545;
+  color: #fff;
+}
+
+/* Add Layer Button (on separator) */
+.add-layer-btn {
+  color: #28a745;
+  background-color: #f8f9fa;
+  border: 1px dashed #28a745;
+  border-radius: 8px;
+  cursor: pointer;
+  width: 100%;
+  height: 30px;
+  font-size: 1.3rem;
+  font-weight: 400;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: background-color 0.2s, color 0.2s, border-color 0.2s;
+}
+
+.add-layer-btn:hover {
+  background-color: #e9f7ee;
+  border-color: #218838;
+  color: #218838;
+}
+
+.add-card-btn {
+  flex: 0 0 60px;
+  align-self: stretch;
+  border: 1px dashed #28a745;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  font-size: 2rem;
+  color: #28a745;
+  cursor: pointer;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+  height: auto;
+  margin: 0;
+}
+
+.add-card-btn:hover {
+  background-color: #e9f7ee;
+  border-color: #218838;
+  color: #218838;
+}
+
+.grid-is-adding .add-card-btn {
+  transition: none !important;
+}
+
+.invisible {
+  visibility: hidden;
+}
+
+.info-hidden {
+  display: none;
+}
+
+/* RESPONSIVE: Hide text labels on viewports < 600px */
+@media (max-width: 620px) {
+  .header-actions a span {
+    display: none;
+  }
+}
+
+/* 5. ANIMATION */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fade-in {
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+.fade-out {
+  animation: fadeOut 0.3s ease-in-out;
+  animation-fill-mode: forwards;
+}
+
+.dashboard-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem; /* Abstand zwischen Icon und Text */
+  padding: 0.5rem 1rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  background-color: #52b35c;
+  cursor: pointer;
+  font-size: 0.9rem;
+  width: 100%; /* Nimmt die volle Breite im Container ein */
+}
+
+.dashboard-button:hover {
+  background-color: #42db63;
+}
+
+.dashboard-button i {
+  font-size: 1.1em; /* Macht das Icon etwas größer als der Text */
+}
+
+.grid-data {
+  display: flex;
+  gap: 0.75rem;
+  padding: 1rem;
+  padding-bottom: 0rem;
+  background-color: #fff;
+  /*border-bottom: 1px solid #dee2e6;*/
+}
+
+.static-chart-title {
+  /*margin-bottom: 0.5rem;*/
+  font-weight: 600;
+  /*margin-right: auto; /* Pushes the delete button to the end */
+}
+
+#card-title-total {
+  font-size: 0.8em;
+  font-weight: 500;
+  color: #adb5bd;
+  margin-left: 0.4em;
+}

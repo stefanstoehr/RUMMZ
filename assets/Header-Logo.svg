@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="793.70099"
+   height="1122.5197"
+   viewBox="0 0 210.00005 296.99999"
+   version="1.1"
+   id="svg1"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <g
+     id="layer2"
+     style="mix-blend-mode:normal">
+    <rect
+       style="fill:#ffff00;stroke:none;stroke-width:0.365001"
+       id="rect1"
+       width="82.88028"
+       height="30.588997"
+       x="-1.7526402"
+       y="-2.0653319" />
+  </g>
+  <g
+     id="layer1"
+     style="mix-blend-mode:normal"
+     transform="translate(-2.1515197,-2.9934187)">
+    <text
+       xml:space="preserve"
+       style="font-size:16.9333px;line-height:2.2;font-family:'Verdana Pro';-inkscape-font-specification:'Verdana Pro';text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#ffff00;stroke:#313239;stroke-width:0.365001"
+       x="4.3509421"
+       y="21.191778"
+       id="text1"><tspan
+         id="tspan1"
+         style="font-style:normal;font-variant:normal;font-weight:900;font-stretch:normal;font-size:16.9333px;font-family:'Verdana Pro';-inkscape-font-specification:'Verdana Pro Heavy';fill:#000000;stroke-width:0.365"
+         x="4.3509421"
+         y="21.191778">RU   MZ</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:900;font-stretch:normal;font-size:16.9333px;line-height:2.2;font-family:'Verdana Pro';-inkscape-font-specification:'Verdana Pro Heavy';text-align:start;writing-mode:lr-tb;direction:ltr;text-anchor:start;fill:#000000;stroke:#313239;stroke-width:0.365001"
+       x="35.18124"
+       y="-6.1693954"
+       id="text2"
+       transform="rotate(40)"><tspan
+         id="tspan2"
+         style="stroke-width:0.365"
+         x="35.18124"
+         y="-6.1693954">M</tspan></text>
+  </g>
+</svg>
