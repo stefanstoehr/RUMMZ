@@ -1351,13 +1351,6 @@ function initLeafletMap(card) {
  * Sets up scroll buttons, event listeners, and creates first card
  */
 function initializeApp() {
-    document.getElementById('scroll-left').onclick = () => {
-        gridContent.scrollBy({ left: -300, behavior: 'smooth' });
-    };
-    document.getElementById('scroll-right').onclick = () => {
-        gridContent.scrollBy({ left: 300, behavior: 'smooth' });
-    };
-
     document.getElementById('show-guide').addEventListener('click', (event) => {
         event.preventDefault();
         const infoCard = document.querySelector('.info');
