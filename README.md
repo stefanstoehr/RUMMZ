@@ -69,8 +69,7 @@ Stärkung der digitalen Souveränität kommunaler Verwaltungen durch:
 - **Leaflet.js** für Karten  
 - **Proj4.js** für Geodaten  
 - **Bootstrap.js** für UI  
-- **Chart.js** für Auswertungen  
-- **Ifc.js** für IFC-Export
+- **Chart.js** für Auswertungen
 
 ### Skalierbarkeit
 - MVP bewusst ohne komplexe Frameworks  
