@@ -83,7 +83,7 @@ Stärkung der digitalen Souveränität kommunaler Verwaltungen durch:
 
 - Sofort einsatzbereit, intuitiv bedienbar  
 - Entlastet kommunale Rechenzentren  
-- Ersetzt teure proprietäre Software (GEOgraf, GGU, Autodesk)  
+- Ersetzt nicht proprietäre Software (GEOgraf, GGU, Autodesk)  
 - Schließt die Lücke, die freie Software wie QGIS nicht abdeckt  
 - Unterstützt nachhaltige Infrastrukturplanung und Umgang mit Boden als endliche Ressource  
 
