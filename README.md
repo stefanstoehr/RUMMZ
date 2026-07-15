@@ -69,7 +69,8 @@ Stärkung der digitalen Souveränität kommunaler Verwaltungen durch:
 - **Leaflet.js** für Karten  
 - **Proj4.js** für Geodaten  
 - **Bootstrap.js** für UI  
-- **Chart.js** für Auswertungen
+- **Chart.js** für Auswertungen  
+- **Ifc.js** für IFC-Export
 
 ### Skalierbarkeit
 - MVP bewusst ohne komplexe Frameworks  
@@ -83,7 +84,7 @@ Stärkung der digitalen Souveränität kommunaler Verwaltungen durch:
 
 - Sofort einsatzbereit, intuitiv bedienbar  
 - Entlastet kommunale Rechenzentren  
-- Ersetzt nicht proprietäre Software (GEOgraf, GGU, Autodesk)  
+- Ersetzt teure proprietäre Software (GEOgraf, GGU, Autodesk)  
 - Schließt die Lücke, die freie Software wie QGIS nicht abdeckt  
 - Unterstützt nachhaltige Infrastrukturplanung und Umgang mit Boden als endliche Ressource  
 

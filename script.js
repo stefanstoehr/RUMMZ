@@ -217,19 +217,21 @@ function renderLayers(card, container) {
     const fragment = document.createDocumentFragment();
     const totalLayers = card.layers.length;
 
-    const firstSeparatorDiv = document.createElement('div');
-    firstSeparatorDiv.className = 'layer-separator';
-    firstSeparatorDiv.innerHTML = `
-        <button class="add-layer-btn" aria-label="Schicht hier einfügen" data-card-id="${card.id}" data-layer-index="-1">+</button>
-    `;
-    fragment.appendChild(firstSeparatorDiv);
-
     card.layers.forEach((layer, layerIndex) => {
         const layerDiv = document.createElement('div');
         layerDiv.className = 'card-layer';
         layerDiv.id = layer.id;
         layerDiv.style.borderLeftColor = layer.color;
         const heightInCm = (typeof layer.height === 'number') ? layer.height : '';
+        const baseNhn = (typeof card.nhn === 'number') ? card.nhn : 0;
+        const layerHeightM = (typeof layer.height === 'number') ? (layer.height / 100) : 0;
+        const topDepthM = card.layers
+            .slice(0, layerIndex)
+            .reduce((sum, currentLayer) => sum + (((typeof currentLayer.height === 'number') ? currentLayer.height : 0) / 100), 0);
+        const bottomDepthM = topDepthM + layerHeightM;
+        const bottomNhnText = `${(baseNhn - bottomDepthM).toFixed(2)} m`;
+        const bottomDepthText = `${bottomDepthM.toFixed(2)} m`;
+        const boundaryText = `NHN: ${bottomNhnText} | Tiefe: ${bottomDepthText}`;
         const predefinedColors = [
             { name: 'Rot', value: '#ff0004' },
             { name: 'Orange', value: '#ff8000' },
@@ -285,11 +287,53 @@ function renderLayers(card, container) {
         separatorDiv.className = 'layer-separator';
         separatorDiv.innerHTML = `
             <button class="add-layer-btn" aria-label="Schicht hier einfügen" data-card-id="${card.id}" data-layer-index="${layerIndex}">+</button>
+            <div class="layer-separator-metric" aria-live="polite">${boundaryText}</div>
         `;
         fragment.appendChild(separatorDiv);
     });
 
     container.appendChild(fragment);
+}
+
+/**
+ * Updates computed layer metric labels in-place for one borehole card
+ * Keeps current input focus/caret because DOM inputs are not recreated
+ * @param {object} card - Card data object
+ */
+function refreshLayerMetricLabels(card) {
+    const cardElem = document.getElementById(card.id);
+    if (!cardElem) return;
+
+    const layersContainer = cardElem.querySelector('.layers-container');
+    if (!layersContainer) return;
+
+    const baseNhn = (typeof card.nhn === 'number') ? card.nhn : 0;
+    let cumulativeDepth = 0;
+
+    card.layers.forEach((layer, layerIndex) => {
+        const layerHeightM = (typeof layer.height === 'number') ? (layer.height / 100) : 0;
+        const topDepthM = cumulativeDepth;
+        const bottomDepthM = topDepthM + layerHeightM;
+
+        const bottomNhnText = `${(baseNhn - bottomDepthM).toFixed(2)} m`;
+        const bottomDepthText = `${bottomDepthM.toFixed(2)} m`;
+
+        const layerElem = document.getElementById(layer.id);
+        if (!layerElem) {
+            cumulativeDepth = bottomDepthM;
+            return;
+        }
+
+        const separatorElem = layerElem.nextElementSibling;
+        if (separatorElem && separatorElem.matches('.layer-separator')) {
+            const metricLine = separatorElem.querySelector('.layer-separator-metric');
+            if (metricLine) {
+                metricLine.textContent = `NHN: ${bottomNhnText} | Tiefe: ${bottomDepthText}`;
+            }
+        }
+
+        cumulativeDepth = bottomDepthM;
+    });
 }
 
 // === CARD RENDER/UPDATE FUNCTIONS ===
@@ -347,7 +391,7 @@ ${getEpsgSelectOptions(card.epsg || '4326')}
             <input type="text" id="lng-${card.id}" name="longitude" placeholder="y" readonly>
         </div>
         <div class="location-input-group nhn-group">
-            <label for="nhn-${card.id}">NHN<span class="card-title-total">(m)</span></label>
+            <label for="nhn-${card.id}">GOK<span class="card-title-total">(m)</span></label>
             <input type="number" id="nhn-${card.id}" name="nhn" min="0" step="0.01" placeholder="0 m"
                    data-card-id="${card.id}" value="${card.nhn || ''}">
         </div>
@@ -850,10 +894,10 @@ function initialRender() {
             </div>
             <div class="map-attribution">
                 <a href="https://threejs.org" target="_blank" rel="noopener noreferrer">three.js</a><span>&nbsp;|</span>
-                <a href="https://github.com/d3/d3-delaunay" target="_blank" rel="noopener noreferrer">d3-delaunay</a><span>&nbsp;|</span>
+                <a href="https://github.com/d3/d3-delaunay" target="_blank" rel="noopener noreferrer">d3.js</a><span>&nbsp;|</span>
                 <a href="https://github.com/proj4js/proj4js" target="_blank" rel="noopener noreferrer">proj4.js</a><span>&nbsp;|</span>
                 <a href="https://www.chartjs.org" target="_blank" rel="noopener noreferrer">chart.js</a><span>&nbsp;|</span>
-                <a href="https://getbootstrap.com" target="_blank" rel="noopener noreferrer">bootstrap</a>
+                <a href="https://getbootstrap.com" target="_blank" rel="noopener noreferrer">bootstrap.js</a>
             </div>
         </div>
     `;
@@ -1154,6 +1198,7 @@ gridContent.addEventListener('input', function(event) {
         card.title = target.value;
     } else if (target.name === 'nhn') {
         card.nhn = target.value ? parseFloat(target.value) : null;
+        refreshLayerMetricLabels(card);
         triggerVisualisationUpdate();
     }
 
@@ -1175,6 +1220,7 @@ gridContent.addEventListener('input', function(event) {
         layer.name = target.value;
     } else if (target.name === 'layerheight') {
         layer.height = target.value ? parseFloat(target.value, 10) : null;
+        refreshLayerMetricLabels(card);
     }
     triggerVisualisationUpdate();
 });
