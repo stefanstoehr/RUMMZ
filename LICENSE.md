@@ -24,5 +24,5 @@ https://creativecommons.org/licenses/by-nc/4.0/
 
 ---
 
-## 💡 Optionaler Zusatz
+## 💡 Zusatz
 Der Quellcode dieser Anwendung ist ausschließlich zur Einsicht und nicht zur kommerziellen Nutzung freigegeben.
