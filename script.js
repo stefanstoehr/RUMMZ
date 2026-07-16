@@ -19,10 +19,58 @@
 
 let cardsData = [];
 let mapInstances = {};
+let markerInstances = {};
 const gridContent = document.querySelector('.grid-content');
 let projectTitle = '';
 let lastSelectedEPSG = '4326';
 let dashboardSelectedEPSG = lastSelectedEPSG;
+const layerNameSuggestions = [
+    'Auffüllung',
+    'Feinkies',
+    'Feinsand',
+    'Fels',
+    'Geschiebelehm',
+    'Geschiebemergel',
+    'Grobkies',
+    'Grobsand',
+    'Kies',
+    'Klei',
+    'Löss',
+    'Mittelkies',
+    'Mittelsand',
+    'Mudde',
+    'Mutterboden',
+    'Sand',
+    'Schluff',
+    'Steine',
+    'Ton',
+    'Torf/Humos',
+    'Wiesenkalk'
+];
+
+const layerNameAutoColorMap = {
+    'auffullung': '#ffffff',
+    'feinkies': '#fff3a6',
+    'feinsand': '#ffcc99',
+    'fels': '#20c991',
+    'geschiebelehm': '#8b8b8b',
+    'geschiebemergel': '#4e79a7',
+    'grobkies': '#e0b100',
+    'grobsand': '#cc7000',
+    'kies': '#fffde7',
+    'klei': '#9c27b0',
+    'loss': '#6b8e23',
+    'mittelkies': '#fff200',
+    'mittelsand': '#ff8000',
+    'mudde': '#ff9ad5',
+    'mutterboden': '#b98b6b',
+    'sand': '#ffd2a6',
+    'schluff': '#6b8e23',
+    'steine': '#b58900',
+    'ton': '#7a5cff',
+    'torf/humos': '#6b4f3a',
+    'wiesenkalk': '#00e1ff'
+};
 
 // Set footer year dynamically
 try {
@@ -166,18 +214,200 @@ function resolveCoordsToEpsg(coords, epsgCode) {
     }
 }
 
+function resolveEpsgToCoords(first, second, epsgCode) {
+    if (epsgCode === '4326' || typeof proj4 === 'undefined') {
+        return { lat: first, lng: second };
+    }
+    try {
+        const result = proj4(`EPSG:${epsgCode}`, 'EPSG:4326', [first, second]);
+        if (!result || !Array.isArray(result)) return null;
+        return { lat: result[1], lng: result[0] };
+    } catch (error) {
+        console.warn('proj4 reverse conversion failed for EPSG:' + epsgCode, error);
+        return null;
+    }
+}
+
+function parseCoordinateInputValue(rawValue) {
+    if (typeof rawValue !== 'string') return null;
+    const normalized = rawValue.trim().replace(',', '.');
+    if (normalized === '') return null;
+    const value = Number(normalized);
+    return Number.isFinite(value) ? value : null;
+}
+
+function clearCoordsInputError(cardId) {
+    const latInput = document.getElementById(`lat-${cardId}`);
+    const lngInput = document.getElementById(`lng-${cardId}`);
+    if (!latInput || !lngInput) return;
+    latInput.classList.remove('coord-input-invalid');
+    lngInput.classList.remove('coord-input-invalid');
+    latInput.title = '';
+    lngInput.title = '';
+}
+
+function setCoordsInputError(cardId, message) {
+    const latInput = document.getElementById(`lat-${cardId}`);
+    const lngInput = document.getElementById(`lng-${cardId}`);
+    if (!latInput || !lngInput) return;
+    latInput.classList.add('coord-input-invalid');
+    lngInput.classList.add('coord-input-invalid');
+    latInput.title = message;
+    lngInput.title = message;
+}
+
+function syncCardMarker(card, options = {}) {
+    const map = mapInstances[card.id];
+    if (!map || !card.coords || map.dataset?.mapError === 'true' || typeof L === 'undefined') return;
+
+    let marker = markerInstances[card.id];
+    if (!marker) {
+        marker = L.marker(card.coords, { draggable: true }).addTo(map);
+        marker.on('drag', function(e) {
+            const newCoords = e.target.getLatLng();
+            card.coords = newCoords;
+            clearCoordsInputError(card.id);
+            updateCoordsInputs(card.id, newCoords);
+        });
+        marker.on('dragend', function() {
+            triggerVisualisationUpdate();
+        });
+        markerInstances[card.id] = marker;
+    } else {
+        marker.setLatLng(card.coords);
+    }
+
+    if (options.centerMap === true) {
+        map.setView(card.coords, map.getZoom());
+    }
+}
+
+function clearCardCoords(card) {
+    card.coords = null;
+    const marker = markerInstances[card.id];
+    if (marker && mapInstances[card.id]) {
+        mapInstances[card.id].removeLayer(marker);
+    }
+    delete markerInstances[card.id];
+    clearCoordsInputError(card.id);
+    updateCoordsInputs(card.id, null);
+}
+
+function commitCoordinateInputs(cardId) {
+    const card = cardsData.find(c => c.id === cardId);
+    if (!card) return;
+
+    const latInput = document.getElementById(`lat-${cardId}`);
+    const lngInput = document.getElementById(`lng-${cardId}`);
+    if (!latInput || !lngInput) return;
+
+    const latRaw = latInput.value.trim();
+    const lngRaw = lngInput.value.trim();
+
+    if (latRaw === '' && lngRaw === '') {
+        clearCardCoords(card);
+        triggerVisualisationUpdate();
+        return;
+    }
+
+    if (latRaw === '' || lngRaw === '') {
+        setCoordsInputError(cardId, 'Bitte beide Koordinatenwerte eingeben.');
+        return;
+    }
+
+    const first = parseCoordinateInputValue(latRaw);
+    const second = parseCoordinateInputValue(lngRaw);
+    if (first === null || second === null) {
+        setCoordsInputError(cardId, 'Ungueltiges Zahlenformat. Beispiel: 51.12345 oder 51,12345');
+        return;
+    }
+
+    const epsgCode = getSelectedEpsg(cardId);
+    const wgsCoords = resolveEpsgToCoords(first, second, epsgCode);
+    if (!wgsCoords || !Number.isFinite(wgsCoords.lat) || !Number.isFinite(wgsCoords.lng)) {
+        setCoordsInputError(cardId, 'Koordinaten konnten nicht umgerechnet werden.');
+        return;
+    }
+
+    if (wgsCoords.lat < -90 || wgsCoords.lat > 90 || wgsCoords.lng < -180 || wgsCoords.lng > 180) {
+        setCoordsInputError(cardId, 'Koordinaten ausserhalb gueltigem Bereich.');
+        return;
+    }
+
+    clearCoordsInputError(cardId);
+    card.coords = wgsCoords;
+    syncCardMarker(card, { centerMap: true });
+    updateCoordsInputs(cardId, wgsCoords);
+    triggerVisualisationUpdate();
+}
+
 function updateCoordsLabel(cardId, epsgCode) {
     const latLabel = document.querySelector(`#${cardId} .lat-label`);
     const lngLabel = document.querySelector(`#${cardId} .lng-label`);
     if (!latLabel || !lngLabel) return;
 
+    const latTextElem = latLabel.querySelector('.coord-label-text');
+    const lngTextElem = lngLabel.querySelector('.coord-label-text');
+
     if (epsgCode === '4326') {
-        latLabel.textContent = 'Latitude';
-        lngLabel.textContent = 'Longitude';
+        if (latTextElem) latTextElem.textContent = 'Latitude';
+        if (lngTextElem) lngTextElem.textContent = 'Longitude';
     } else {
-        latLabel.textContent = 'Easting';
-        lngLabel.textContent = 'Northing';
+        if (latTextElem) latTextElem.textContent = 'Easting';
+        if (lngTextElem) lngTextElem.textContent = 'Northing';
     }
+
+    updateCoordTooltipText(cardId, epsgCode);
+}
+
+function getCoordTooltipText(epsgCode, field) {
+    if (epsgCode === '4326') {
+        if (field === 'first') {
+            return 'Latitude in Dezimalgrad. Gueltiger Bereich: -90 bis 90. Beispiel: 51.23456';
+        }
+        return 'Longitude in Dezimalgrad. Gueltiger Bereich: -180 bis 180. Beispiel: 7.12345';
+    }
+
+    if (field === 'first') {
+        return `Easting in EPSG:${epsgCode} (Meter). Beispiel: 392000`;
+    }
+    return `Northing in EPSG:${epsgCode} (Meter). Beispiel: 5704000`;
+}
+
+function updateCoordTooltipText(cardId, epsgCode) {
+    const firstTooltip = document.getElementById(`coord-tooltip-first-${cardId}`);
+    const secondTooltip = document.getElementById(`coord-tooltip-second-${cardId}`);
+    const firstBtn = document.querySelector(`#${cardId} .coord-info-btn[data-coord-kind="first"]`);
+    const secondBtn = document.querySelector(`#${cardId} .coord-info-btn[data-coord-kind="second"]`);
+
+    const firstText = getCoordTooltipText(epsgCode, 'first');
+    const secondText = getCoordTooltipText(epsgCode, 'second');
+
+    const firstTextElem = firstTooltip?.querySelector('.coord-tooltip-text');
+    const secondTextElem = secondTooltip?.querySelector('.coord-tooltip-text');
+    if (firstTextElem) firstTextElem.textContent = firstText;
+    if (secondTextElem) secondTextElem.textContent = secondText;
+    if (firstBtn) firstBtn.removeAttribute('title');
+    if (secondBtn) secondBtn.removeAttribute('title');
+}
+
+function hideCoordTooltips(exceptTooltipId = null) {
+    const tooltips = document.querySelectorAll('.coord-tooltip.is-visible');
+    tooltips.forEach((tooltip) => {
+        if (exceptTooltipId && tooltip.id === exceptTooltipId) return;
+        tooltip.classList.remove('is-visible');
+    });
+}
+
+function toggleCoordTooltip(cardId, coordKind) {
+    const tooltipId = `coord-tooltip-${coordKind}-${cardId}`;
+    const tooltip = document.getElementById(tooltipId);
+    if (!tooltip) return;
+
+    tooltip.classList.remove('coord-tooltip-dismissed');
+    const shouldShow = !tooltip.classList.contains('is-visible');
+    hideCoordTooltips(shouldShow ? tooltipId : null);
+    tooltip.classList.toggle('is-visible', shouldShow);
 }
 
 // Hilfsfunktion für Hex zu RGB Konvertierung
@@ -203,6 +433,150 @@ function hexToRgb(hex) {
  */
 function triggerVisualisationUpdate() {
     window.dispatchEvent(new CustomEvent('updateVisualisation', { detail: { cardsData: cardsData } }));
+}
+
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function normalizeLayerNameValue(value) {
+    return String(value || '')
+        .toLocaleLowerCase('de-DE')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+}
+
+function getFilteredLayerNameSuggestions(query) {
+    const normalizedQuery = normalizeLayerNameValue(query).trim();
+    if (!normalizedQuery) return layerNameSuggestions;
+
+    const startsWithMatches = layerNameSuggestions.filter((name) => {
+        return normalizeLayerNameValue(name).startsWith(normalizedQuery);
+    });
+
+    const containsMatches = layerNameSuggestions.filter((name) => {
+        const normalizedName = normalizeLayerNameValue(name);
+        return !normalizedName.startsWith(normalizedQuery) && normalizedName.includes(normalizedQuery);
+    });
+
+    return [...startsWithMatches, ...containsMatches];
+}
+
+function getLayerNameOptionButtonsMarkup(query) {
+    const suggestions = getFilteredLayerNameSuggestions(query);
+    if (!suggestions.length) {
+        return '<div class="layername-option-empty">Kein passender Vorschlag</div>';
+    }
+
+    return suggestions.map((name) => {
+        const escaped = escapeHtml(name);
+        return `<button type="button" class="layername-option" data-value="${escaped}">${escaped}</button>`;
+    }).join('');
+}
+
+function updateLayerNameMenuForInput(input) {
+    const group = input.closest('.layername-input-group');
+    if (!group) return;
+    const list = group.querySelector('.layername-menu-list');
+    if (!list) return;
+    list.innerHTML = getLayerNameOptionButtonsMarkup(input.value || '');
+}
+
+function getLayerNameOptions(group) {
+    if (!group) return [];
+    return Array.from(group.querySelectorAll('.layername-option'));
+}
+
+function setActiveLayerNameOption(group, nextIndex, shouldScroll = true) {
+    const options = getLayerNameOptions(group);
+    if (!options.length) return -1;
+
+    const safeIndex = Math.max(0, Math.min(nextIndex, options.length - 1));
+    options.forEach((option, index) => {
+        const isActive = index === safeIndex;
+        option.classList.toggle('is-active', isActive);
+        option.setAttribute('aria-selected', String(isActive));
+        if (isActive && shouldScroll) {
+            option.scrollIntoView({ block: 'nearest' });
+        }
+    });
+
+    return safeIndex;
+}
+
+function getActiveLayerNameOptionIndex(group) {
+    const options = getLayerNameOptions(group);
+    return options.findIndex((option) => option.classList.contains('is-active'));
+}
+
+function hideLayerNameMenu(group) {
+    const menu = group?.querySelector('.layername-menu');
+    if (!menu) return;
+    menu.hidden = true;
+    group.classList.remove('layername-menu-open');
+}
+
+function hideAllLayerNameMenus(exceptGroup = null) {
+    document.querySelectorAll('.layername-input-group').forEach((group) => {
+        if (exceptGroup && group === exceptGroup) return;
+        hideLayerNameMenu(group);
+    });
+}
+
+function showLayerNameMenuForInput(input) {
+    const group = input.closest('.layername-input-group');
+    if (!group) return;
+
+    hideAllLayerNameMenus(group);
+    updateLayerNameMenuForInput(input);
+
+    const menu = group.querySelector('.layername-menu');
+    if (!menu) return;
+    menu.hidden = false;
+    group.classList.add('layername-menu-open');
+    setActiveLayerNameOption(group, 0, false);
+}
+
+function applyLayerNameInputValue(input, value) {
+    input.value = value;
+
+    const cardId = input.dataset.cardId;
+    const layerId = input.dataset.layerId;
+    const card = cardsData.find(c => c.id === cardId);
+    const layer = card?.layers.find(l => l.id === layerId);
+    if (layer) {
+        layer.name = value;
+        applyAutoColorForLayer(card.id, layer);
+        triggerVisualisationUpdate();
+    }
+}
+
+function getAutoColorForLayerName(layerName) {
+    const normalized = normalizeLayerNameValue(layerName).trim();
+    if (!normalized) return null;
+    return layerNameAutoColorMap[normalized] || null;
+}
+
+function applyAutoColorForLayer(cardId, layer) {
+    if (!cardId || !layer) return;
+    const autoColor = getAutoColorForLayerName(layer.name);
+    if (!autoColor) return;
+
+    layer.color = autoColor;
+
+    const colorInput = document.querySelector(`.layer-color-picker[data-card-id="${cardId}"][data-layer-id="${layer.id}"]`);
+    if (colorInput) {
+        colorInput.value = autoColor;
+    }
+
+    const layerElement = document.getElementById(layer.id);
+    if (layerElement) {
+        layerElement.style.borderLeftColor = autoColor;
+    }
 }
 
 // === LAYER RENDER/UPDATE FUNCTIONS ===
@@ -269,13 +643,40 @@ function renderLayers(card, container) {
                 <button class="delete-layer-btn ${card.layers.length <= 1 ? 'invisible' : ''}" aria-label="Schicht löschen" data-card-id="${card.id}" data-layer-id="${layer.id}">×</button>
             </div>
             <div class="layer-inputs">
-                <div class="location-input-group">
-                    <label for="layername-${layer.id}">Name</label>
+                <div class="location-input-group layername-input-group">
+                    <label class="coord-label-wrap coord-label-wrap-full" for="layername-${layer.id}">
+                        <span class="required-label-prefix"><span class="required-marker" aria-hidden="true">*</span><span class="coord-label-text">Name</span></span>
+                        <button type="button" class="coord-info-btn" data-card-id="${layer.id}" data-coord-kind="layername" aria-label="Info zu Schichtname">
+                            <i class="bi bi-question-circle"></i>
+                        </button>
+                        <span class="coord-tooltip coord-tooltip-short coord-tooltip-align-input" id="coord-tooltip-layername-${layer.id}" role="tooltip">
+                            <button type="button" class="coord-tooltip-close" aria-label="Tooltip schliessen">×</button>
+                            <span class="coord-tooltip-text">Marterial/Substanz</span>
+                        </span>
+                    </label>
                     <input type="text" id="layername-${layer.id}" name="layername" placeholder="Schichtbezeichnung"
-                           data-card-id="${card.id}" data-layer-id="${layer.id}" value="${layer.name || ''}">
+                              data-card-id="${card.id}" data-layer-id="${layer.id}" value="${layer.name || ''}">
+                    <div class="layername-menu" hidden>
+                        <div class="layername-menu-header">
+                            <span>Auswahl</span>
+                            <button type="button" class="layername-menu-close" aria-label="Liste schliessen">×</button>
+                        </div>
+                        <div class="layername-menu-list" role="listbox" aria-label="Schichtnamen">
+                            ${getLayerNameOptionButtonsMarkup(layer.name || '')}
+                        </div>
+                    </div>
                 </div>
                 <div class="location-input-group height-group">
-                    <label for="layerheight-${layer.id}">Höhe<span class="card-title-total">(cm)</span></label>
+                    <label class="coord-label-wrap coord-label-wrap-full" for="layerheight-${layer.id}">
+                        <span class="required-label-prefix"><span class="required-marker" aria-hidden="true">*</span><span class="coord-label-text">Höhe<span class="card-title-total">(cm)</span></span></span>
+                        <button type="button" class="coord-info-btn" data-card-id="${layer.id}" data-coord-kind="layerheight" aria-label="Info zu Schichthoehe">
+                            <i class="bi bi-question-circle"></i>
+                        </button>
+                        <span class="coord-tooltip coord-tooltip-right coord-tooltip-short" id="coord-tooltip-layerheight-${layer.id}" role="tooltip">
+                            <button type="button" class="coord-tooltip-close" aria-label="Tooltip schliessen">×</button>
+                            <span class="coord-tooltip-text">Schichtmächtigkeit</span>
+                        </span>
+                    </label>
                     <input type="number" id="layerheight-${layer.id}" name="layerheight" min="0" step="1" placeholder="cm"
                            data-card-id="${card.id}" data-layer-id="${layer.id}" value="${heightInCm}">
                 </div>
@@ -383,15 +784,42 @@ ${getEpsgSelectOptions(card.epsg || '4326')}
     locationDiv.className = 'card-location';
     locationDiv.innerHTML = `
         <div class="location-input-group">
-            <label class="lat-label" for="lat-${card.id}">Latitude</label>
-            <input type="text" id="lat-${card.id}" name="latitude" placeholder="x" readonly>
+            <label class="lat-label coord-label-wrap" for="lat-${card.id}">
+                <span class="required-label-prefix"><span class="required-marker" aria-hidden="true">*</span><span class="coord-label-text">Latitude</span></span>
+                <button type="button" class="coord-info-btn" data-card-id="${card.id}" data-coord-kind="first" aria-label="Info zu Latitude">
+                    <i class="bi bi-question-circle"></i>
+                </button>
+                <span class="coord-tooltip" id="coord-tooltip-first-${card.id}" role="tooltip">
+                    <button type="button" class="coord-tooltip-close" aria-label="Tooltip schliessen">×</button>
+                    <span class="coord-tooltip-text"></span>
+                </span>
+            </label>
+            <input type="text" id="lat-${card.id}" name="latitude" data-card-id="${card.id}" placeholder="x">
         </div>
         <div class="location-input-group">
-            <label class="lng-label" for="lng-${card.id}">Longitude</label>
-            <input type="text" id="lng-${card.id}" name="longitude" placeholder="y" readonly>
+            <label class="lng-label coord-label-wrap" for="lng-${card.id}">
+                <span class="required-label-prefix"><span class="required-marker" aria-hidden="true">*</span><span class="coord-label-text">Longitude</span></span>
+                <button type="button" class="coord-info-btn" data-card-id="${card.id}" data-coord-kind="second" aria-label="Info zu Longitude">
+                    <i class="bi bi-question-circle"></i>
+                </button>
+                <span class="coord-tooltip coord-tooltip-center" id="coord-tooltip-second-${card.id}" role="tooltip">
+                    <button type="button" class="coord-tooltip-close" aria-label="Tooltip schliessen">×</button>
+                    <span class="coord-tooltip-text"></span>
+                </span>
+            </label>
+            <input type="text" id="lng-${card.id}" name="longitude" data-card-id="${card.id}" placeholder="y">
         </div>
         <div class="location-input-group nhn-group">
-            <label for="nhn-${card.id}">GOK<span class="card-title-total">(m)</span></label>
+            <label class="coord-label-wrap" for="nhn-${card.id}">
+                <span class="required-label-prefix"><span class="required-marker" aria-hidden="true">*</span><span class="coord-label-text">GOK<span class="card-title-total">(m)</span></span></span>
+                <button type="button" class="coord-info-btn" data-card-id="${card.id}" data-coord-kind="nhn" aria-label="Info zu GOK">
+                    <i class="bi bi-question-circle"></i>
+                </button>
+                <span class="coord-tooltip coord-tooltip-right coord-tooltip-short" id="coord-tooltip-nhn-${card.id}" role="tooltip">
+                    <button type="button" class="coord-tooltip-close" aria-label="Tooltip schliessen">×</button>
+                    <span class="coord-tooltip-text">Gelaendeoberkante</span>
+                </span>
+            </label>
             <input type="number" id="nhn-${card.id}" name="nhn" min="0" step="0.01" placeholder="0 m"
                    data-card-id="${card.id}" value="${card.nhn || ''}">
         </div>
@@ -577,10 +1005,26 @@ function initialRender() {
             <div class="card-title"><i class="bi bi-3-circle-fill" style="margin-right: 0.5rem;"></i>Geplante Erweiterungen</div>
             <ul style="list-style-type: none; padding-left: 0; margin-top: 0.5rem;">
                 <li style="margin-bottom: 0.75rem; display: flex; align-items: flex-start;">
-                    <i class="bi bi-check-circle" style="margin-right: 0.5rem; font-size: 1.2em;"></i>
+                    <i class="bi bi-check-circle" style="margin-right: 0.5rem; font-size: 1.2em; color: #198754;"></i>
                     <div id="guide">
-                        <span>
+                        <span style="color: #a1a1a1;">
                             Koordinaten selber eingeben
+                        </span>
+                    </div>
+                </li>
+                <li style="margin-bottom: 0.75rem; display: flex; align-items: flex-start;">
+                    <i class="bi bi-check-circle" style="margin-right: 0.5rem; font-size: 1.2em; color: #198754;"></i>
+                    <div id="guide">
+                        <span style="color: #a1a1a1;">
+                            Tiefenpositionen flexibilisieren
+                        </span>
+                    </div>
+                </li>
+                <li style="margin-bottom: 0.75rem; display: flex; align-items: flex-start;">
+                    <i class="bi bi-check-circle" style="margin-right: 0.5rem; font-size: 1.2em; color: #198754;"></i>
+                    <div id="guide">
+                        <span style="color: #a1a1a1;">
+                            Autofill-Optionen
                         </span>
                     </div>
                 </li>
@@ -724,14 +1168,6 @@ function initialRender() {
                     <i class="bi bi-check-circle" style="margin-right: 0.5rem; font-size: 1.2em;"></i>
                     <div id="guide">
                         <span>
-                            Tiefenpositionen flexibilisieren
-                        </span>
-                    </div>
-                </li>
-                <li style="margin-bottom: 0.75rem; display: flex; align-items: flex-start;">
-                    <i class="bi bi-check-circle" style="margin-right: 0.5rem; font-size: 1.2em;"></i>
-                    <div id="guide">
-                        <span>
                             Transparenz-/Abstands-Regler
                         </span>
                     </div>
@@ -741,14 +1177,6 @@ function initialRender() {
                     <div id="guide">
                         <span>
                             Bohrungsdurchmesser-Regler
-                        </span>
-                    </div>
-                </li>
-                <li style="margin-bottom: 0.75rem; display: flex; align-items: flex-start;">
-                    <i class="bi bi-check-circle" style="margin-right: 0.5rem; font-size: 1.2em;"></i>
-                    <div id="guide">
-                        <span>
-                            Autofill-Optionen
                         </span>
                     </div>
                 </li>
@@ -1024,6 +1452,53 @@ gridContent.addEventListener('click', function(event) {
     const target = event.target;
     if (target.classList.contains('invisible')) return;
 
+    const layerNameCloseBtn = target.closest('.layername-menu-close');
+    if (layerNameCloseBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        const layerGroup = layerNameCloseBtn.closest('.layername-input-group');
+        if (layerGroup) hideLayerNameMenu(layerGroup);
+        return;
+    }
+
+    const layerNameOption = target.closest('.layername-option');
+    if (layerNameOption) {
+        event.preventDefault();
+        event.stopPropagation();
+        const layerGroup = layerNameOption.closest('.layername-input-group');
+        const input = layerGroup?.querySelector('input[name="layername"]');
+        if (input) {
+            applyLayerNameInputValue(input, layerNameOption.dataset.value || '');
+            hideLayerNameMenu(layerGroup);
+            input.focus();
+        }
+        return;
+    }
+
+    const closeBtn = target.closest('.coord-tooltip-close');
+    if (closeBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        const tooltip = closeBtn.closest('.coord-tooltip');
+        if (tooltip) {
+            tooltip.classList.remove('is-visible');
+            tooltip.classList.add('coord-tooltip-dismissed');
+        }
+        return;
+    }
+
+    const infoBtn = target.closest('.coord-info-btn');
+    if (infoBtn) {
+        event.preventDefault();
+        event.stopPropagation();
+        const cardId = infoBtn.dataset.cardId;
+        const coordKind = infoBtn.dataset.coordKind;
+        if (cardId && coordKind) {
+            toggleCoordTooltip(cardId, coordKind);
+        }
+        return;
+    }
+
     if (target.closest('.color-swatch')) {
         event.preventDefault();
         event.stopPropagation();
@@ -1104,6 +1579,7 @@ gridContent.addEventListener('click', function(event) {
                         mapInstances[cardId].remove();
                         delete mapInstances[cardId];
                     }
+                    delete markerInstances[cardId];
                     cardsData.splice(cardIndex, 1);
                     if(cardElem) cardElem.remove();
                     if(precedingAddBtn && precedingAddBtn.matches('.add-card-btn')) {
@@ -1188,8 +1664,93 @@ gridContent.addEventListener('click', function(event) {
     }
 });
 
+document.addEventListener('click', function(event) {
+    if (event.target.closest('.coord-label-wrap')) return;
+    hideCoordTooltips();
+
+    if (!event.target.closest('.layername-input-group')) {
+        hideAllLayerNameMenus();
+    }
+});
+
+document.addEventListener('focusin', function(event) {
+    if (!event.target.closest('.layername-input-group')) {
+        hideAllLayerNameMenus();
+    }
+});
+
+gridContent.addEventListener('focusin', function(event) {
+    const target = event.target;
+    if (target.matches('input[name="layername"]')) {
+        showLayerNameMenuForInput(target);
+    }
+});
+
+gridContent.addEventListener('keydown', function(event) {
+    const target = event.target;
+    if (!target.matches('input[name="layername"]')) return;
+
+    const group = target.closest('.layername-input-group');
+    if (!group) return;
+
+    const menu = group.querySelector('.layername-menu');
+    const isOpen = menu && !menu.hidden;
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (!isOpen) {
+            showLayerNameMenuForInput(target);
+            return;
+        }
+
+        const options = getLayerNameOptions(group);
+        if (!options.length) return;
+
+        const currentIndex = getActiveLayerNameOptionIndex(group);
+        const direction = event.key === 'ArrowDown' ? 1 : -1;
+        const fallbackIndex = direction > 0 ? -1 : options.length;
+        const nextIndex = currentIndex === -1 ? fallbackIndex + direction : currentIndex + direction;
+        const wrappedIndex = (nextIndex + options.length) % options.length;
+        setActiveLayerNameOption(group, wrappedIndex, true);
+        return;
+    }
+
+    if (event.key === 'Enter') {
+        if (!isOpen) return;
+        const options = getLayerNameOptions(group);
+        if (!options.length) return;
+
+        event.preventDefault();
+        const activeIndex = getActiveLayerNameOptionIndex(group);
+        const optionToApply = options[Math.max(0, activeIndex)];
+        if (optionToApply) {
+            applyLayerNameInputValue(target, optionToApply.dataset.value || '');
+            hideLayerNameMenu(group);
+        }
+        return;
+    }
+
+    if (event.key === 'Escape') {
+        if (!isOpen) return;
+        event.preventDefault();
+        hideLayerNameMenu(group);
+        return;
+    }
+
+    if (event.key === 'Tab' && isOpen) {
+        hideLayerNameMenu(group);
+    }
+});
+
 gridContent.addEventListener('input', function(event) {
     const target = event.target;
+    if (target.name === 'latitude' || target.name === 'longitude') {
+        const coordCardId = target.dataset.cardId;
+        if (coordCardId) {
+            clearCoordsInputError(coordCardId);
+        }
+    }
+
     const cardId = target.dataset.cardId;
     const card = cardsData.find(c => c.id === cardId);
     if (!card) return;
@@ -1218,6 +1779,8 @@ gridContent.addEventListener('input', function(event) {
 
     if (target.name === 'layername') {
         layer.name = target.value;
+        applyAutoColorForLayer(card.id, layer);
+        showLayerNameMenuForInput(target);
     } else if (target.name === 'layerheight') {
         layer.height = target.value ? parseFloat(target.value, 10) : null;
         refreshLayerMetricLabels(card);
@@ -1230,6 +1793,14 @@ gridContent.addEventListener('change', function(event) {
     const target = event.target;
     if (target.classList.contains('layer-color-picker')) {
         triggerVisualisationUpdate();
+        return;
+    }
+
+    if (target.name === 'latitude' || target.name === 'longitude') {
+        const cardId = target.dataset.cardId;
+        if (cardId) {
+            commitCoordinateInputs(cardId);
+        }
         return;
     }
 
@@ -1275,6 +1846,7 @@ function updateCoordsInputs(cardId, coords) {
             const [first, second] = converted;
             latInput.value = first !== undefined && first !== null ? first.toFixed(5) : '';
             lngInput.value = second !== undefined && second !== null ? second.toFixed(5) : '';
+            clearCoordsInputError(cardId);
         } else {
             latInput.value = '';
             lngInput.value = '';
@@ -1282,6 +1854,7 @@ function updateCoordsInputs(cardId, coords) {
     } else {
         latInput.value = '';
         lngInput.value = '';
+        clearCoordsInputError(cardId);
     }
 }
 
@@ -1354,37 +1927,15 @@ function initLeafletMap(card) {
         failLeafletMap(card.id, mapElement, 'Karte konnte nicht geladen werden. Zeige statischen Fallback.');
     });
 
-    let marker;
     if (card.coords) {
-        marker = L.marker(card.coords, { draggable: true }).addTo(map);
+        syncCardMarker(card, { centerMap: false });
         map.setView(card.coords, 13);
         updateCoordsInputs(card.id, card.coords);
     }
 
-    const onMarkerDrag = (e) => {
-        const newCoords = e.target.getLatLng();
-        card.coords = newCoords;
-        updateCoordsInputs(card.id, newCoords);
-    };
-
-    const onMarkerDragEnd = () => {
-        triggerVisualisationUpdate();
-    };
-
-    if (marker) {
-        marker.on('drag', onMarkerDrag);
-        marker.on('dragend', onMarkerDragEnd);
-    }
-
     map.on('click', function(e) {
         card.coords = e.latlng;
-        if (!marker) {
-            marker = L.marker(e.latlng, { draggable: true }).addTo(map);
-            marker.on('drag', onMarkerDrag);
-            marker.on('dragend', onMarkerDragEnd);
-        } else {
-            marker.setLatLng(e.latlng);
-        }
+        syncCardMarker(card, { centerMap: false });
         updateCoordsInputs(card.id, e.latlng);
         triggerVisualisationUpdate();
     });

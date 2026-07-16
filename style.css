@@ -257,6 +257,7 @@ main {
   flex: 0 0 320px;
   max-width: 100%;
   height: 100%;
+  overflow-x: hidden;
   overflow-y: scroll;
 }
 
@@ -479,9 +480,106 @@ label {
   color: #495057;
 }
 
+.required-marker {
+  display: inline;
+  color: #dc3545;
+  font-weight: 700;
+  margin-right: 0;
+  line-height: 1;
+}
+
+.required-label-prefix {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+}
+
 .layer-inputs {
   display: flex;
   gap: 0.75rem;
+}
+
+.layername-input-group {
+  position: relative;
+}
+
+.layername-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 100%;
+  max-width: min(320px, calc(100vw - 2rem));
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
+  z-index: 2100;
+  overflow: hidden;
+}
+
+.layername-menu-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #495057;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.layername-menu-close {
+  border: 0;
+  background: transparent;
+  color: #6c757d;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.layername-menu-close:hover,
+.layername-menu-close:focus-visible {
+  color: #212529;
+}
+
+.layername-menu-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 230px;
+  overflow-y: auto;
+}
+
+.layername-option {
+  border: 0;
+  border-bottom: 1px solid #f1f3f5;
+  background: #ffffff;
+  color: #212529;
+  text-align: left;
+  font-size: 0.86rem;
+  line-height: 1.2;
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+}
+
+.layername-option:last-child {
+  border-bottom: 0;
+}
+
+.layername-option:hover,
+.layername-option:focus-visible {
+  background: #e7f1ff;
+}
+
+.layername-option.is-active {
+  background: #e7f1ff;
+}
+
+.layername-option-empty {
+  padding: 0.55rem 0.6rem;
+  font-size: 0.82rem;
+  color: #6c757d;
 }
 
 input[type="text"], input[type="number"], select {
@@ -503,6 +601,121 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus {
   outline: none;
   border-color: #80bdff;
   box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25);
+}
+
+.coord-input-invalid {
+  border-color: #dc3545 !important;
+  box-shadow: 0 0 0 0.2rem rgba(220,53,69,.15);
+}
+
+.coord-label-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  position: relative;
+}
+
+.coord-label-wrap-full {
+  display: flex !important;
+  width: 100%;
+  justify-content: flex-start;
+  flex-wrap: nowrap;
+}
+
+.coord-info-btn {
+  border: 0;
+  background: transparent;
+  color: #6c757d;
+  padding: 0;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.coord-info-btn:hover,
+.coord-info-btn:focus-visible {
+  color: #0d6efd;
+}
+
+.coord-tooltip {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  left: 0;
+  min-width: 210px;
+  max-width: min(260px, calc(100vw - 2rem));
+  padding: 0.42rem 1.45rem 0.5rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(33, 37, 41, 0.96);
+  color: #fff;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  z-index: 2000;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-2px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s ease;
+}
+
+.coord-tooltip-close {
+  position: absolute;
+  top: 0.14rem;
+  right: 0.24rem;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.coord-tooltip-close:hover,
+.coord-tooltip-close:focus-visible {
+  color: #ffffff;
+}
+
+.coord-tooltip-right {
+  left: auto;
+  right: 0;
+}
+
+.coord-tooltip-short {
+  min-width: 0;
+  max-width: 170px;
+  white-space: nowrap;
+}
+
+.coord-tooltip-align-input {
+  left: 0 !important;
+  right: auto;
+}
+
+.coord-tooltip-center {
+  left: 50%;
+  right: auto;
+  transform: translate(-45%, -2px);
+}
+
+.coord-tooltip.is-visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.coord-label-wrap:hover .coord-tooltip:not(.coord-tooltip-dismissed),
+.coord-label-wrap:focus-within .coord-tooltip:not(.coord-tooltip-dismissed) {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.coord-tooltip-center.is-visible,
+.coord-label-wrap:hover .coord-tooltip-center:not(.coord-tooltip-dismissed),
+.coord-label-wrap:focus-within .coord-tooltip-center:not(.coord-tooltip-dismissed) {
+  transform: translate(-45%, 0);
 }
 
 .layer-header {
