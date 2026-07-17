@@ -24,6 +24,7 @@ const gridContent = document.querySelector('.grid-content');
 let projectTitle = '';
 let lastSelectedEPSG = '4326';
 let dashboardSelectedEPSG = lastSelectedEPSG;
+let ifcOverlayRequestId = 0;
 const layerNameSuggestions = [
     'Auffüllung',
     'Feinkies',
@@ -96,6 +97,51 @@ function hideLoadingOverlay() {
     }
 }
 
+function showIfcDownloadOverlay() {
+    ifcOverlayRequestId += 1;
+    const requestId = ifcOverlayRequestId;
+
+    const existingOverlay = document.getElementById('ifc-download-overlay');
+    if (existingOverlay) {
+        existingOverlay.remove();
+    }
+
+    const preloadImage = new Image();
+    const timeoutId = setTimeout(() => {
+        preloadImage.onload = null;
+        preloadImage.onerror = null;
+    }, 3000);
+
+    preloadImage.onload = () => {
+        clearTimeout(timeoutId);
+        if (requestId !== ifcOverlayRequestId) return;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'ifc-download-overlay';
+        overlay.className = 'loading-overlay';
+        overlay.innerHTML = `
+            <div class="loading-content">
+                <img src="assets/cartoon-freude.png" alt="IFC Download gestartet" class="landing-image">
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        setTimeout(() => {
+            overlay.classList.add('fade-out');
+            setTimeout(() => {
+                overlay.remove();
+            }, 500);
+        }, 2000);
+    };
+
+    preloadImage.onerror = () => {
+        clearTimeout(timeoutId);
+    };
+
+    preloadImage.src = 'assets/cartoon-freude.png';
+}
+
 // Trigger when page loads
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', hideLoadingOverlay);
@@ -111,7 +157,7 @@ function createNewLayer(cardId, layerNum) {
         id: `${cardId}-layer-${layerNum}-${Date.now()}`,
         name: '',
         height: null, // Stored in cm
-        color: '#dee2e6' // Default color
+        color: '#000000' // Default color
     };
 }
 
@@ -590,14 +636,26 @@ function renderLayers(card, container) {
     container.innerHTML = ''; // Clear the container
     const fragment = document.createDocumentFragment();
     const totalLayers = card.layers.length;
+    const baseNhn = (typeof card.nhn === 'number') ? card.nhn : 0;
+    const topBoundaryText = `NHN: ${baseNhn.toFixed(2)} m | Tiefe: 0.00 m`;
+
+    const topSeparatorDiv = document.createElement('div');
+    topSeparatorDiv.className = 'layer-separator layer-separator-top';
+    topSeparatorDiv.innerHTML = `
+            <div class="layer-separator-content">
+                <div class="layer-separator-metric" aria-live="polite">${topBoundaryText}</div>
+                <button class="add-layer-btn" aria-label="Schicht hier einfügen" data-card-id="${card.id}" data-layer-index="-1"><i class="bi bi-plus-circle" aria-hidden="true"></i></button>
+            </div>
+        `;
+    fragment.appendChild(topSeparatorDiv);
 
     card.layers.forEach((layer, layerIndex) => {
         const layerDiv = document.createElement('div');
         layerDiv.className = 'card-layer';
         layerDiv.id = layer.id;
-        layerDiv.style.borderLeftColor = layer.color;
+        const layerColor = layer.color || '#000000';
+        layerDiv.style.borderLeftColor = layerColor;
         const heightInCm = (typeof layer.height === 'number') ? layer.height : '';
-        const baseNhn = (typeof card.nhn === 'number') ? card.nhn : 0;
         const layerHeightM = (typeof layer.height === 'number') ? (layer.height / 100) : 0;
         const topDepthM = card.layers
             .slice(0, layerIndex)
@@ -631,16 +689,19 @@ function renderLayers(card, container) {
                 <div class="layer-title-block">
                     <strong>Schicht ${layerIndex + 1} <span class="card-title-total">von ${totalLayers}</span></strong>
                     <div class="color-picker-group">
+                        <button type="button" class="color-picker-plus" aria-label="Eigene Farbe auswählen" title="Eigene Farbe auswählen" style="color:${layerColor}; border-color:${layerColor};">
+                            +
+                            <input type="color" class="layer-color-picker"
+                                   data-card-id="${card.id}" data-layer-id="${layer.id}" value="${layerColor}" aria-label="Schichtfarbe wählen">
+                        </button>
                         <div class="color-swatch-row" role="list" aria-label="Vordefinierte Farben">
                             ${predefinedColors.map(({ name, value }) => `
                                 <button type="button" class="color-swatch" data-card-id="${card.id}" data-layer-id="${layer.id}" data-color="${value}" style="background-color:${value}" title="${name}" aria-label="Farbe ${name}"></button>
                             `).join('')}
                         </div>
-                        <input type="color" class="layer-color-picker" 
-                               data-card-id="${card.id}" data-layer-id="${layer.id}" value="${layer.color}" aria-label="Schichtfarbe wählen">
                     </div>
                 </div>
-                <button class="delete-layer-btn ${card.layers.length <= 1 ? 'invisible' : ''}" aria-label="Schicht löschen" data-card-id="${card.id}" data-layer-id="${layer.id}">×</button>
+                <button class="delete-layer-btn ${card.layers.length <= 1 ? 'invisible' : ''}" aria-label="Schicht löschen" data-card-id="${card.id}" data-layer-id="${layer.id}"><i class="bi bi-x-circle" aria-hidden="true"></i></button>
             </div>
             <div class="layer-inputs">
                 <div class="location-input-group layername-input-group">
@@ -687,8 +748,10 @@ function renderLayers(card, container) {
         const separatorDiv = document.createElement('div');
         separatorDiv.className = 'layer-separator';
         separatorDiv.innerHTML = `
-            <button class="add-layer-btn" aria-label="Schicht hier einfügen" data-card-id="${card.id}" data-layer-index="${layerIndex}">+</button>
-            <div class="layer-separator-metric" aria-live="polite">${boundaryText}</div>
+            <div class="layer-separator-content">
+                <div class="layer-separator-metric" aria-live="polite">${boundaryText}</div>
+                <button class="add-layer-btn" aria-label="Schicht hier einfügen" data-card-id="${card.id}" data-layer-index="${layerIndex}"><i class="bi bi-plus-circle" aria-hidden="true"></i></button>
+            </div>
         `;
         fragment.appendChild(separatorDiv);
     });
@@ -710,6 +773,11 @@ function refreshLayerMetricLabels(card) {
 
     const baseNhn = (typeof card.nhn === 'number') ? card.nhn : 0;
     let cumulativeDepth = 0;
+
+    const topSeparatorMetric = layersContainer.querySelector('.layer-separator-top .layer-separator-metric');
+    if (topSeparatorMetric) {
+        topSeparatorMetric.textContent = `NHN: ${baseNhn.toFixed(2)} m | Tiefe: 0.00 m`;
+    }
 
     card.layers.forEach((layer, layerIndex) => {
         const layerHeightM = (typeof layer.height === 'number') ? (layer.height / 100) : 0;
@@ -754,7 +822,7 @@ function createCardElement(card, index) {
     header.className = 'card-header';
     header.innerHTML = `
         <div class="card-title"><i class="bi bi-database-fill" style="margin-right: 0.5rem;"></i>Bohrung ${index + 1}</div>
-        <button class="delete-card-btn" aria-label="Bohrung löschen" data-card-id="${card.id}">×</button>
+        <button class="delete-card-btn" aria-label="Bohrung löschen" data-card-id="${card.id}"><i class="bi bi-x-circle" aria-hidden="true"></i></button>
     `;
     cardElem.appendChild(header);
 
@@ -903,7 +971,7 @@ function initialRender() {
     infoDiv.innerHTML = `
         <div class="card-header">
             <div class="card-title"><i class="bi bi-lightbulb-fill" style="margin-right: 0.5rem;"></i>GUIDE</div>
-            <div class="hide-info-btn" aria-label="Guide ausblenden"><i class="bi bi-x-lg"></i></div>
+            <button type="button" class="hide-info-btn" aria-label="Guide ausblenden"><i class="bi bi-x-circle" aria-hidden="true"></i></button>
         </div>
         <div class="card-details" style="display: block; padding: 1.25rem; font-size: 0.95rem; line-height: 1.6;">
             <div class="card-title"><i class="bi bi-1-circle-fill" style="margin-right: 0.5rem;"></i>Hinweise</div>
@@ -1561,8 +1629,9 @@ gridContent.addEventListener('click', function(event) {
         }, 0);
     }
 
-    if (target.matches('.delete-card-btn')) {
-        const cardId = target.dataset.cardId;
+    const deleteCardBtn = target.closest('.delete-card-btn');
+    if (deleteCardBtn) {
+        const cardId = deleteCardBtn.dataset.cardId;
         if(cardsData.length > 1) {
             const cardElem = document.getElementById(cardId);
             const precedingAddBtn = cardElem.previousElementSibling;
@@ -1592,11 +1661,12 @@ gridContent.addEventListener('click', function(event) {
         }
     }
 
-    if (target.matches('.add-layer-btn')) {
-        const cardId = target.dataset.cardId;
+    const addLayerBtn = target.closest('.add-layer-btn');
+    if (addLayerBtn) {
+        const cardId = addLayerBtn.dataset.cardId;
         const card = cardsData.find(c => c.id === cardId);
         if (card) {
-            const layerIndex = parseInt(target.dataset.layerIndex, 10);
+            const layerIndex = parseInt(addLayerBtn.dataset.layerIndex, 10);
             const newLayer = createNewLayer(card.id, card.layers.length + 1);
             card.layers.splice(layerIndex + 1, 0, newLayer);
     
@@ -1629,9 +1699,10 @@ gridContent.addEventListener('click', function(event) {
         }
     }
 
-    if (target.matches('.delete-layer-btn')) {
-        const cardId = target.dataset.cardId;
-        const layerId = target.dataset.layerId;
+    const deleteLayerBtn = target.closest('.delete-layer-btn');
+    if (deleteLayerBtn) {
+        const cardId = deleteLayerBtn.dataset.cardId;
+        const layerId = deleteLayerBtn.dataset.layerId;
         const card = cardsData.find(c => c.id === cardId);
 
         if (card && card.layers.length > 1) {
@@ -1770,6 +1841,12 @@ gridContent.addEventListener('input', function(event) {
             layer.color = target.value;
             // Update border color for instant visual feedback
             document.getElementById(layer.id).style.borderLeftColor = target.value;
+            const colorPickerPlus = document.querySelector(`.color-picker-plus .layer-color-picker[data-card-id="${cardId}"][data-layer-id="${layerId}"]`);
+            const colorPickerButton = colorPickerPlus?.closest('.color-picker-plus');
+            if (colorPickerButton) {
+                colorPickerButton.style.color = target.value;
+                colorPickerButton.style.borderColor = target.value;
+            }
         }
         return;
     }
@@ -2101,7 +2178,7 @@ function buildIfcExport(fullIFC, boxReference, generateIFCFaceSet, generateIFCBo
             borehole.layers.forEach((layer, layerIndex) => {
                 const key = `${boreholeIndex}-${layerIndex}`;
                 const layerName = layer.name || `Schicht ${layerIndex + 1}`;
-                const color = layer.color || '#dee2e6';
+                const color = layer.color || '#000000';
                 const rgb = hexToRgb(color);
                 const rgbString = rgb ? `${(rgb.r / 255).toFixed(1)},${(rgb.g / 255).toFixed(1)},${(rgb.b / 255).toFixed(1)}` : '0.5,0.5,0.5';
 
@@ -2284,7 +2361,7 @@ async function performIfcExport() {
             setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
         console.log('performIfcExport: finished and download triggered', { fileName });
-        alert(`IFC-Download wurde gestartet: ${fileName}`);
+        showIfcDownloadOverlay();
     } catch (err) {
         console.error('IFC export failed:', err);
         alert('IFC-Export fehlgeschlagen. Konsole prüfen.');
