@@ -70,6 +70,7 @@ Stärkung der digitalen Souveränität kommunaler Verwaltungen durch:
 - **Proj4.js** für Geodaten  
 - **Bootstrap.js** für UI  
 - **Chart.js** für Auswertungen
+- **RUMMZ-IFC** für Open-BIM
 
 ### Skalierbarkeit
 - MVP bewusst ohne komplexe Frameworks  
@@ -82,8 +83,7 @@ Stärkung der digitalen Souveränität kommunaler Verwaltungen durch:
 ## 🎯 Nutzen für Kommunen
 
 - Sofort einsatzbereit, intuitiv bedienbar  
-- Entlastet kommunale Rechenzentren  
-- Ersetzt nicht proprietäre Software (KorFin, GEOgraf, GGU, Autodesk)  
+- Entlastet kommunale Rechenzentren    
 - Schließt die Lücke, die freie Software wie QGIS nicht abdeckt  
 - Unterstützt nachhaltige Infrastrukturplanung und Umgang mit Boden als endliche Ressource  
 
@@ -95,7 +95,7 @@ In Deutschland entstehen jährlich ca. **200.000 Baugrundgutachten** (Statista: 
 Diese müssen BIM-konform digitalisiert werden – bisher meist durch kostenintensive externe Vergaben.
 
 RUMMZ bietet:
-- eine kostengünstige, sichere und einfache Alternative,
+- eine kostenfreie, sichere, und souverän einfache Alternative,
 - digitale Selbstbestimmung für öffentliche Akteure,
 - schnellere und transparentere Planungsprozesse.
 
@@ -127,7 +127,17 @@ RUMMZ bietet:
 
 **Stefan Stoehr, M.A., B.Sc.**  
 buildingSMART Professional Certification – Foundation (VDI/bS-MT 2552 8.1.)  
-Altmarkt 14  
+
+Brandenburgische Technische Universität Cottbus-Senftenberg (BTU)
+
+Lehrstuhl für Produktionswirtschaft
+Forschungszentrum (FZ) 3H, Labor 1.07
+Konrad-Wachsmann-Allee 13
+
+Fachgebiet Werkzeugmaschinen
+Mehrzweckgebäude (MZG), Raum 219
+Universitätsstraße 22
+
 03046 Cottbus  
 
 - Website: https://rummz.de  
@@ -141,4 +151,3 @@ Altmarkt 14
 
 ## 🏷️ Lizenz
 *CC BY NC 4.0*
-

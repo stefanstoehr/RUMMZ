@@ -902,7 +902,7 @@ function initialRender() {
     infoDiv.id = 'info-base-card';
     infoDiv.innerHTML = `
         <div class="card-header">
-            <div class="card-title"><i class="bi bi-lightbulb-fill" style="margin-right: 0.5rem;"></i>Geschäftsbedingungen</div>
+            <div class="card-title"><i class="bi bi-lightbulb-fill" style="margin-right: 0.5rem;"></i>GUIDE</div>
             <div class="hide-info-btn" aria-label="Guide ausblenden"><i class="bi bi-x-lg"></i></div>
         </div>
         <div class="card-details" style="display: block; padding: 1.25rem; font-size: 0.95rem; line-height: 1.6;">
