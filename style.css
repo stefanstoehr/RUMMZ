@@ -19,6 +19,18 @@
   --control-height: calc(0.9rem + 1rem + 2px);
 }
 
+.seo-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* 0. LOADING OVERLAY */
 .loading-overlay {
   position: fixed;
@@ -169,6 +181,14 @@ footer {
   align-items: center;
   justify-content: center;
   flex-wrap: wrap;
+}
+
+.footer-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  display: inline-block;
+  margin-right: 0.35rem;
+  flex: 0 0 auto;
 }
 
 /* 1.1 HEADER & FOOTER ICONS */
