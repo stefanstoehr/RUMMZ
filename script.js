@@ -478,6 +478,7 @@ function hexToRgb(hex) {
  * Sends current cardsData to visualization listeners
  */
 function triggerVisualisationUpdate() {
+    updateUICardControls();
     window.dispatchEvent(new CustomEvent('updateVisualisation', { detail: { cardsData: cardsData } }));
 }
 
@@ -494,6 +495,58 @@ function normalizeLayerNameValue(value) {
         .toLocaleLowerCase('de-DE')
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '');
+}
+
+function isRenderableLayer(layer) {
+    return !!layer
+        && typeof layer.name === 'string'
+        && layer.name.trim() !== ''
+        && typeof layer.height === 'number'
+        && layer.height > 0
+        && typeof layer.color === 'string'
+        && layer.color.trim() !== '';
+}
+
+function hasRenderableCardCore(card) {
+    return !!card
+        && typeof card.nhn === 'number'
+        && !!card.coords
+        && typeof card.coords === 'object'
+        && typeof card.coords.lat === 'number'
+        && typeof card.coords.lng === 'number';
+}
+
+function getCardRenderStatus(card) {
+    const layers = Array.isArray(card?.layers) ? card.layers : [];
+    const renderableLayersCount = layers.filter(isRenderableLayer).length;
+    const hasRenderableCoreData = hasRenderableCardCore(card);
+
+    if (hasRenderableCoreData && layers.length > 0 && renderableLayersCount === layers.length) {
+        return {
+            state: 'full',
+            iconClass: 'bi-database-fill-check',
+            label: 'Alles renderbar'
+        };
+    }
+
+    if (hasRenderableCoreData && renderableLayersCount > 0) {
+        return {
+            state: 'partial',
+            iconClass: 'bi-database-fill-dash',
+            label: `Teilweise renderbar: ${renderableLayersCount} von ${layers.length} Schichten sichtbar`
+        };
+    }
+
+    return {
+        state: 'none',
+        iconClass: 'bi-database-fill-exclamation',
+        label: 'Noch nicht renderbar'
+    };
+}
+
+function getCardTitleMarkup(card, index, totalCards) {
+    const status = getCardRenderStatus(card);
+    return `<i class="bi ${status.iconClass} card-render-status card-render-status--${status.state}" role="img" aria-label="${escapeHtml(status.label)}" title="${escapeHtml(status.label)}"></i>Bohrung ${index + 1} <span class="card-title-total">von ${totalCards}</span>`;
 }
 
 function getFilteredLayerNameSuggestions(query) {
@@ -821,7 +874,7 @@ function createCardElement(card, index) {
     const header = document.createElement('div');
     header.className = 'card-header';
     header.innerHTML = `
-        <div class="card-title"><i class="bi bi-database-fill" style="margin-right: 0.5rem;"></i>Bohrung ${index + 1}</div>
+        <div class="card-title">${getCardTitleMarkup(card, index, cardsData.length || 1)}</div>
         <button class="delete-card-btn" aria-label="Bohrung löschen" data-card-id="${card.id}"><i class="bi bi-x-circle" aria-hidden="true"></i></button>
     `;
     cardElem.appendChild(header);
@@ -937,7 +990,8 @@ function updateUICardControls() {
     cards.forEach((cardElem, index) => {
         const title = cardElem.querySelector('.card-title');
         if (title) {
-            title.innerHTML = `<i class="bi bi-database-fill" style="margin-right: 0.5rem;"></i>Bohrung ${index + 1} <span class="card-title-total">von ${totalCards}</span>`;
+            const card = cardsData[index];
+            title.innerHTML = getCardTitleMarkup(card, index, totalCards);
         }
         const titleInput = cardElem.querySelector('input[name="card-title-input"]');
         if (titleInput) {
@@ -1512,21 +1566,16 @@ ${getEpsgSelectOptions(dashboardSelectedEPSG)}
 
 // === EVENT DELEGATION & HANDLERS ===
 
-/**
- * Central click handler for card/layer management
- * Handles: add/delete cards, add/delete layers, info card toggle
- */
-gridContent.addEventListener('click', function(event) {
-    const target = event.target;
-    if (target.classList.contains('invisible')) return;
+// Click helpers: UI overlays/menus without data mutations.
 
+function handleLayerNameMenuClick(event, target) {
     const layerNameCloseBtn = target.closest('.layername-menu-close');
     if (layerNameCloseBtn) {
         event.preventDefault();
         event.stopPropagation();
         const layerGroup = layerNameCloseBtn.closest('.layername-input-group');
         if (layerGroup) hideLayerNameMenu(layerGroup);
-        return;
+        return true;
     }
 
     const layerNameOption = target.closest('.layername-option');
@@ -1540,9 +1589,13 @@ gridContent.addEventListener('click', function(event) {
             hideLayerNameMenu(layerGroup);
             input.focus();
         }
-        return;
+        return true;
     }
 
+    return false;
+}
+
+function handleCoordTooltipClick(event, target) {
     const closeBtn = target.closest('.coord-tooltip-close');
     if (closeBtn) {
         event.preventDefault();
@@ -1552,7 +1605,7 @@ gridContent.addEventListener('click', function(event) {
             tooltip.classList.remove('is-visible');
             tooltip.classList.add('coord-tooltip-dismissed');
         }
-        return;
+        return true;
     }
 
     const infoBtn = target.closest('.coord-info-btn');
@@ -1564,175 +1617,225 @@ gridContent.addEventListener('click', function(event) {
         if (cardId && coordKind) {
             toggleCoordTooltip(cardId, coordKind);
         }
-        return;
+        return true;
     }
 
-    if (target.closest('.color-swatch')) {
-        event.preventDefault();
-        event.stopPropagation();
+    return false;
+}
 
-        const swatch = target.closest('.color-swatch');
-        const cardId = swatch.dataset.cardId;
-        const layerId = swatch.dataset.layerId;
-        const color = swatch.dataset.color;
-        const card = cardsData.find(c => c.id === cardId);
-        const layer = card?.layers.find(l => l.id === layerId);
+function handleColorSwatchClick(event, target) {
+    const swatch = target.closest('.color-swatch');
+    if (!swatch) return false;
 
-        if (layer) {
-            layer.color = color;
-            const colorInput = document.querySelector(`.layer-color-picker[data-card-id="${cardId}"][data-layer-id="${layerId}"]`);
-            if (colorInput) {
-                colorInput.value = color;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const cardId = swatch.dataset.cardId;
+    const layerId = swatch.dataset.layerId;
+    const color = swatch.dataset.color;
+    const card = cardsData.find(c => c.id === cardId);
+    const layer = card?.layers.find(l => l.id === layerId);
+
+    if (layer) {
+        layer.color = color;
+        const colorInput = document.querySelector(`.layer-color-picker[data-card-id="${cardId}"][data-layer-id="${layerId}"]`);
+        if (colorInput) {
+            colorInput.value = color;
+        }
+        const layerElement = document.getElementById(layerId);
+        if (layerElement) {
+            layerElement.style.borderLeftColor = color;
+        }
+        triggerVisualisationUpdate();
+    }
+
+    return true;
+}
+
+function handleHideInfoClick(target) {
+    if (!target.closest('.hide-info-btn')) return false;
+
+    const infoCard = document.querySelector('.info');
+    if (infoCard) {
+        infoCard.classList.add('info-hidden');
+    }
+    return true;
+}
+
+// Click helpers: card/layer data mutations.
+
+function handleAddCardClick(target) {
+    if (!target.matches('.add-card-btn')) return false;
+
+    gridContent.classList.add('grid-is-adding');
+    const index = parseInt(target.dataset.index, 10);
+
+    let initialView = null;
+    if (index > 0 && cardsData[index - 1]) {
+        const prevMap = mapInstances[cardsData[index - 1].id];
+        if (prevMap) {
+            initialView = { center: prevMap.getCenter(), zoom: prevMap.getZoom() };
+        }
+    }
+
+    const newCardData = createNewCard(index, initialView, lastSelectedEPSG);
+    cardsData.splice(index, 0, newCardData);
+    const newCardElem = createCardElement(newCardData, index);
+    const newAddBtn = createAddBtn(index);
+
+    newAddBtn.classList.add('fade-in');
+    newCardElem.classList.add('fade-in');
+    setTimeout(() => {
+        newAddBtn.classList.remove('fade-in');
+        newCardElem.classList.remove('fade-in');
+    }, 500);
+
+    target.before(newAddBtn, newCardElem);
+    // After inserting into DOM, ensure coords/labels reflect EPSG
+    updateCoordsInputs(newCardData.id, newCardData.coords);
+    initLeafletMap(newCardData);
+    updateUICardControls();
+    triggerVisualisationUpdate();
+
+    setTimeout(() => {
+        gridContent.classList.remove('grid-is-adding');
+    }, 0);
+
+    return true;
+}
+
+function handleDeleteCardClick(target) {
+    const deleteCardBtn = target.closest('.delete-card-btn');
+    if (!deleteCardBtn) return false;
+
+    const cardId = deleteCardBtn.dataset.cardId;
+    if (cardsData.length <= 1) return true;
+
+    const cardElem = document.getElementById(cardId);
+    if (!cardElem) return true;
+    const precedingAddBtn = cardElem.previousElementSibling;
+
+    cardElem.classList.add('fade-out');
+    if (precedingAddBtn && precedingAddBtn.matches('.add-card-btn')) {
+        precedingAddBtn.classList.add('fade-out');
+    }
+
+    setTimeout(() => {
+        const cardIndex = cardsData.findIndex(c => c.id === cardId);
+        if (cardIndex > -1) {
+            if (mapInstances[cardId]) {
+                mapInstances[cardId].remove();
+                delete mapInstances[cardId];
             }
-            const layerElement = document.getElementById(layerId);
-            if (layerElement) {
-                layerElement.style.borderLeftColor = color;
+            delete markerInstances[cardId];
+            cardsData.splice(cardIndex, 1);
+            if (cardElem) cardElem.remove();
+            if (precedingAddBtn && precedingAddBtn.matches('.add-card-btn')) {
+                precedingAddBtn.remove();
             }
+            updateUICardControls();
             triggerVisualisationUpdate();
         }
-        return;
-    }
+    }, 300);
 
-    if (target.matches('.add-card-btn')) {
-        gridContent.classList.add('grid-is-adding');
-        const index = parseInt(target.dataset.index, 10);
+    return true;
+}
 
-        let initialView = null;
-        if (index > 0 && cardsData[index - 1]) {
-            const prevMap = mapInstances[cardsData[index - 1].id];
-            if (prevMap) {
-                initialView = { center: prevMap.getCenter(), zoom: prevMap.getZoom() };
-            }
-        }
-
-        const newCardData = createNewCard(index, initialView, lastSelectedEPSG);
-        cardsData.splice(index, 0, newCardData);
-        const newCardElem = createCardElement(newCardData, index);
-        const newAddBtn = createAddBtn(index);
-
-        newAddBtn.classList.add('fade-in');
-        newCardElem.classList.add('fade-in');
-        setTimeout(() => {
-            newAddBtn.classList.remove('fade-in');
-            newCardElem.classList.remove('fade-in');
-        }, 500);
-
-        target.before(newAddBtn, newCardElem);
-        // After inserting into DOM, ensure coords/labels reflect EPSG
-        updateCoordsInputs(newCardData.id, newCardData.coords);
-        initLeafletMap(newCardData);
-        updateUICardControls();
-        triggerVisualisationUpdate();
-
-        setTimeout(() => {
-            gridContent.classList.remove('grid-is-adding');
-        }, 0);
-    }
-
-    const deleteCardBtn = target.closest('.delete-card-btn');
-    if (deleteCardBtn) {
-        const cardId = deleteCardBtn.dataset.cardId;
-        if(cardsData.length > 1) {
-            const cardElem = document.getElementById(cardId);
-            const precedingAddBtn = cardElem.previousElementSibling;
-
-            cardElem.classList.add('fade-out');
-            if(precedingAddBtn && precedingAddBtn.matches('.add-card-btn')) {
-                precedingAddBtn.classList.add('fade-out');
-            }
-
-            setTimeout(() => {
-                const cardIndex = cardsData.findIndex(c => c.id === cardId);
-                if (cardIndex > -1) {
-                    if (mapInstances[cardId]) {
-                        mapInstances[cardId].remove();
-                        delete mapInstances[cardId];
-                    }
-                    delete markerInstances[cardId];
-                    cardsData.splice(cardIndex, 1);
-                    if(cardElem) cardElem.remove();
-                    if(precedingAddBtn && precedingAddBtn.matches('.add-card-btn')) {
-                        precedingAddBtn.remove();
-                    }
-                    updateUICardControls();
-                    triggerVisualisationUpdate();
-                }
-            }, 300);
-        }
-    }
-
+function handleAddLayerClick(target) {
     const addLayerBtn = target.closest('.add-layer-btn');
-    if (addLayerBtn) {
-        const cardId = addLayerBtn.dataset.cardId;
-        const card = cardsData.find(c => c.id === cardId);
-        if (card) {
-            const layerIndex = parseInt(addLayerBtn.dataset.layerIndex, 10);
-            const newLayer = createNewLayer(card.id, card.layers.length + 1);
-            card.layers.splice(layerIndex + 1, 0, newLayer);
-    
+    if (!addLayerBtn) return false;
+
+    const cardId = addLayerBtn.dataset.cardId;
+    const card = cardsData.find(c => c.id === cardId);
+    if (!card) return true;
+
+    const layerIndex = parseInt(addLayerBtn.dataset.layerIndex, 10);
+    const newLayer = createNewLayer(card.id, card.layers.length + 1);
+    card.layers.splice(layerIndex + 1, 0, newLayer);
+
+    const cardElem = document.getElementById(cardId);
+    if (!cardElem) return true;
+    const layersContainer = cardElem.querySelector('.layers-container');
+    if (!layersContainer) return true;
+    renderLayers(card, layersContainer);
+
+    const newLayerElem = document.getElementById(newLayer.id);
+    if (newLayerElem) {
+        newLayerElem.classList.add('fade-in');
+
+        // Find the separator DIV that comes directly after the new layer
+        const separatorElem = newLayerElem.nextElementSibling;
+
+        // Scroll the separator (which contains the '+') into view
+        if (separatorElem) {
+            separatorElem.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        } else {
+            // Fallback if the separator isn't found for some reason
+            newLayerElem.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+
+        setTimeout(() => newLayerElem.classList.remove('fade-in'), 500);
+    }
+
+    if (mapInstances[card.id]) {
+        setTimeout(() => mapInstances[card.id].invalidateSize(), 400);
+    }
+    triggerVisualisationUpdate();
+    return true;
+}
+
+function handleDeleteLayerClick(target) {
+    const deleteLayerBtn = target.closest('.delete-layer-btn');
+    if (!deleteLayerBtn) return false;
+
+    const cardId = deleteLayerBtn.dataset.cardId;
+    const layerId = deleteLayerBtn.dataset.layerId;
+    const card = cardsData.find(c => c.id === cardId);
+
+    if (card && card.layers.length > 1) {
+        const layerElem = document.getElementById(layerId);
+        if (!layerElem) return true;
+        const separatorElem = layerElem.nextElementSibling;
+
+        layerElem.classList.add('fade-out');
+        if (separatorElem && separatorElem.matches('.layer-separator')) {
+            separatorElem.classList.add('fade-out');
+        }
+
+        setTimeout(() => {
+            card.layers = card.layers.filter(layer => layer.id !== layerId);
             const cardElem = document.getElementById(cardId);
+            if (!cardElem) return;
             const layersContainer = cardElem.querySelector('.layers-container');
+            if (!layersContainer) return;
             renderLayers(card, layersContainer);
-    
-            const newLayerElem = document.getElementById(newLayer.id);
-            if (newLayerElem) {
-                newLayerElem.classList.add('fade-in');
-
-                // Find the separator DIV that comes directly after the new layer
-                const separatorElem = newLayerElem.nextElementSibling;
-
-                // Scroll the separator (which contains the '+') into view
-                if (separatorElem) {
-                    separatorElem.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                } else {
-                    // Fallback if the separator isn't found for some reason
-                    newLayerElem.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                }
-                
-                setTimeout(() => newLayerElem.classList.remove('fade-in'), 500);
-            }
-    
             if (mapInstances[card.id]) {
                 setTimeout(() => mapInstances[card.id].invalidateSize(), 400);
             }
             triggerVisualisationUpdate();
-        }
+        }, 300);
     }
 
-    const deleteLayerBtn = target.closest('.delete-layer-btn');
-    if (deleteLayerBtn) {
-        const cardId = deleteLayerBtn.dataset.cardId;
-        const layerId = deleteLayerBtn.dataset.layerId;
-        const card = cardsData.find(c => c.id === cardId);
+    return true;
+}
 
-        if (card && card.layers.length > 1) {
-            const layerElem = document.getElementById(layerId);
-            const separatorElem = layerElem.nextElementSibling;
+/**
+ * Central click handler for card/layer management
+ * Handles: add/delete cards, add/delete layers, info card toggle
+ */
+gridContent.addEventListener('click', function(event) {
+    const target = event.target;
+    if (target.classList.contains('invisible')) return;
 
-            layerElem.classList.add('fade-out');
-            if (separatorElem && separatorElem.matches('.layer-separator')) {
-                separatorElem.classList.add('fade-out');
-            }
+    if (handleLayerNameMenuClick(event, target)) return;
+    if (handleCoordTooltipClick(event, target)) return;
+    if (handleColorSwatchClick(event, target)) return;
+    if (handleAddCardClick(target)) return;
+    if (handleDeleteCardClick(target)) return;
+    if (handleAddLayerClick(target)) return;
+    if (handleDeleteLayerClick(target)) return;
 
-            setTimeout(() => {
-                card.layers = card.layers.filter(layer => layer.id !== layerId);
-                const cardElem = document.getElementById(cardId);
-                const layersContainer = cardElem.querySelector('.layers-container');
-                renderLayers(card, layersContainer);
-                if (mapInstances[card.id]) {
-                    setTimeout(() => mapInstances[card.id].invalidateSize(), 400);
-                }
-                triggerVisualisationUpdate();
-            }, 300);
-        }
-    }
-
-    if (target.closest('.hide-info-btn')) {
-        const infoCard = document.querySelector('.info');
-        if (infoCard) {
-            infoCard.classList.add('info-hidden');
-        }
-    }
+    handleHideInfoClick(target);
 });
 
 document.addEventListener('click', function(event) {
@@ -1813,46 +1916,60 @@ gridContent.addEventListener('keydown', function(event) {
     }
 });
 
-gridContent.addEventListener('input', function(event) {
-    const target = event.target;
-    if (target.name === 'latitude' || target.name === 'longitude') {
-        const coordCardId = target.dataset.cardId;
-        if (coordCardId) {
-            clearCoordsInputError(coordCardId);
-        }
+// Input helpers: draft state updates while typing.
+
+function handleProjectTitleInput(target) {
+    if (target.id !== 'dashboard-project-title') return false;
+    projectTitle = target.value;
+    return true;
+}
+
+function handleCoordinateDraftInput(target) {
+    if (target.name !== 'latitude' && target.name !== 'longitude') return;
+    const coordCardId = target.dataset.cardId;
+    if (coordCardId) {
+        clearCoordsInputError(coordCardId);
     }
+}
 
-    const cardId = target.dataset.cardId;
-    const card = cardsData.find(c => c.id === cardId);
-    if (!card) return;
-
+function handleCardMetaInput(target, card) {
     if (target.name === 'card-title-input') {
         card.title = target.value;
-    } else if (target.name === 'nhn') {
+        return;
+    }
+
+    if (target.name === 'nhn') {
         card.nhn = target.value ? parseFloat(target.value) : null;
         refreshLayerMetricLabels(card);
         triggerVisualisationUpdate();
     }
+}
 
-    const layerId = target.dataset.layerId;
-    if (target.classList.contains('layer-color-picker')) {
-        const layer = card.layers.find(l => l.id === layerId);
-        if (layer) {
-            layer.color = target.value;
-            // Update border color for instant visual feedback
-            document.getElementById(layer.id).style.borderLeftColor = target.value;
-            const colorPickerPlus = document.querySelector(`.color-picker-plus .layer-color-picker[data-card-id="${cardId}"][data-layer-id="${layerId}"]`);
-            const colorPickerButton = colorPickerPlus?.closest('.color-picker-plus');
-            if (colorPickerButton) {
-                colorPickerButton.style.color = target.value;
-                colorPickerButton.style.borderColor = target.value;
-            }
-        }
-        return;
-    }
+function handleLayerColorInput(target, card, cardId, layerId) {
+    if (!target.classList.contains('layer-color-picker')) return false;
 
     const layer = card.layers.find(l => l.id === layerId);
-    if (!layer) return;
+    if (layer) {
+        layer.color = target.value;
+        // Update border color for instant visual feedback
+        const layerElement = document.getElementById(layer.id);
+        if (layerElement) {
+            layerElement.style.borderLeftColor = target.value;
+        }
+        const colorPickerPlus = document.querySelector(`.color-picker-plus .layer-color-picker[data-card-id="${cardId}"][data-layer-id="${layerId}"]`);
+        const colorPickerButton = colorPickerPlus?.closest('.color-picker-plus');
+        if (colorPickerButton) {
+            colorPickerButton.style.color = target.value;
+            colorPickerButton.style.borderColor = target.value;
+        }
+    }
+
+    return true;
+}
+
+function handleLayerDataInput(target, card, layerId) {
+    const layer = card.layers.find(l => l.id === layerId);
+    if (!layer) return false;
 
     if (target.name === 'layername') {
         layer.name = target.value;
@@ -1862,43 +1979,77 @@ gridContent.addEventListener('input', function(event) {
         layer.height = target.value ? parseFloat(target.value, 10) : null;
         refreshLayerMetricLabels(card);
     }
+
     triggerVisualisationUpdate();
+    return true;
+}
+
+gridContent.addEventListener('input', function(event) {
+    const target = event.target;
+    if (handleProjectTitleInput(target)) return;
+
+    handleCoordinateDraftInput(target);
+
+    const cardId = target.dataset.cardId;
+    const card = cardsData.find(c => c.id === cardId);
+    if (!card) return;
+
+    handleCardMetaInput(target, card);
+
+    const layerId = target.dataset.layerId;
+    if (handleLayerColorInput(target, card, cardId, layerId)) return;
+    handleLayerDataInput(target, card, layerId);
 });
+
+// Change helpers: commit/finalize values.
+
+function handleFinalLayerColorChange(target) {
+    if (!target.classList.contains('layer-color-picker')) return false;
+    triggerVisualisationUpdate();
+    return true;
+}
+
+function handleCoordinateCommitChange(target) {
+    if (target.name !== 'latitude' && target.name !== 'longitude') return false;
+
+    const cardId = target.dataset.cardId;
+    if (cardId) {
+        commitCoordinateInputs(cardId);
+    }
+    return true;
+}
+
+function handleCardEpsgChange(target) {
+    if (target.name !== 'epsg') return false;
+
+    const cardId = target.dataset.cardId;
+    const card = cardsData.find(c => c.id === cardId);
+    if (card) {
+        const epsgCode = getSelectedEpsg(cardId);
+        card.epsg = epsgCode;
+        lastSelectedEPSG = epsgCode;
+        updateCoordsLabel(cardId, epsgCode);
+        if (card.coords) {
+            updateCoordsInputs(cardId, card.coords);
+        }
+    }
+    return true;
+}
+
+function handleDashboardIfcEpsgChange(target) {
+    if (target.id !== 'dashboard-ifc-epsg') return false;
+    dashboardSelectedEPSG = target.value;
+    lastSelectedEPSG = target.value;
+    return true;
+}
 
 // This listener triggers the visualisation update only when the color selection is final
 gridContent.addEventListener('change', function(event) {
     const target = event.target;
-    if (target.classList.contains('layer-color-picker')) {
-        triggerVisualisationUpdate();
-        return;
-    }
-
-    if (target.name === 'latitude' || target.name === 'longitude') {
-        const cardId = target.dataset.cardId;
-        if (cardId) {
-            commitCoordinateInputs(cardId);
-        }
-        return;
-    }
-
-    if (target.name === 'epsg') {
-        const cardId = target.dataset.cardId;
-        const card = cardsData.find(c => c.id === cardId);
-        if (card) {
-            const epsgCode = getSelectedEpsg(cardId);
-            card.epsg = epsgCode;
-            lastSelectedEPSG = epsgCode;
-            updateCoordsLabel(cardId, epsgCode);
-            if (card.coords) {
-                updateCoordsInputs(cardId, card.coords);
-            }
-        }
-    }
-
-    if (target.id === 'dashboard-ifc-epsg') {
-        dashboardSelectedEPSG = target.value;
-        lastSelectedEPSG = target.value;
-    }
+    if (handleFinalLayerColorChange(target)) return;
+    if (handleCoordinateCommitChange(target)) return;
+    if (handleCardEpsgChange(target)) return;
+    handleDashboardIfcEpsgChange(target);
 });
 
 // === LEAFLET MAP INITIALIZATION ===
@@ -2042,268 +2193,65 @@ function initializeApp() {
 
 initializeApp();
 
-function decimalDegreesToIfcDMS(decimal) {
-    const sign = Math.sign(decimal) >= 0 ? 1 : -1;
-    const absValue = Math.abs(decimal);
-    const degrees = Math.floor(absValue);
-    const minutesFloat = (absValue - degrees) * 60;
-    const minutes = Math.floor(minutesFloat);
-    let seconds = Number(((minutesFloat - minutes) * 60).toFixed(4));
-    if (seconds >= 60) {
-        seconds = 0;
-        minutes += 1;
-    }
-    if (minutes >= 60) {
-        minutes = 0;
-        degrees += 1;
-    }
-    const signedDegrees = sign * degrees;
-    return `(${signedDegrees},${minutes},${seconds})`;
+function getProjectTitleValue() {
+    return typeof projectTitle === 'string' ? projectTitle.trim() : '';
 }
 
-function buildIfcExport(fullIFC, boxReference, generateIFCFaceSet, generateIFCBoxSet, getNextIfcEntityId, selectedEpsg = '25833') {
-    // Hilfsfunktion: Erzeugt 22-stellige GUIDs aus numerischen IDs
-    function generateIFCGUID(idNumber) {
-        const idStr = idNumber.toString();
-        const paddingNeeded = 22 - idStr.length;
-        if (paddingNeeded < 0) {
-            throw new Error(`GUID-Wert zu lang: ${idStr.length} Zeichen (max 22)`);
-        }
-        return '0'.repeat(paddingNeeded) + idStr;
+function getIfcDownloadBaseName() {
+    const normalizedTitle = getProjectTitleValue().replace(/[^\w-]+/g, '_');
+    return normalizedTitle || 'rummz_model';
+}
+
+function getIfcExportSnapshot() {
+    const snapshotProvider = window.getRummzIfcSnapshot;
+    const snapshot = typeof snapshotProvider === 'function' ? snapshotProvider() : null;
+    if (!snapshot || !Array.isArray(snapshot.ifcMeshes)) return null;
+
+    return {
+        cardsData: Array.isArray(snapshot.cardsData) ? snapshot.cardsData : cardsData,
+        ifcMeshes: snapshot.ifcMeshes,
+        ifcOrigin: snapshot.ifcOrigin || { x: 0, y: 0, z: 0 },
+        source: 'snapshot'
+    };
+}
+
+function createIfcExportContext() {
+    const ifcSnapshot = getIfcExportSnapshot();
+    if (!ifcSnapshot) {
+        throw new Error('IFC snapshot is not available. Build the visualisation first.');
     }
 
-    const ifcCrs = ifcProjectedCRSDefinitions[selectedEpsg] || ifcProjectedCRSDefinitions['4326'];
-    const selectedEpsgLabel = ifcCrs.name;
-    const selectedEpsgDescription = `EPSG:${selectedEpsg} - ${ifcCrs.name}`;
-    const selectedEpsgZone = ifcCrs.zone === '$' ? '$' : `'${ifcCrs.zone}'`;
+    const exportCardsData = Array.isArray(ifcSnapshot.cardsData) && ifcSnapshot.cardsData.length > 0 ? ifcSnapshot.cardsData : cardsData;
+    const exportIfcMeshes = Array.isArray(ifcSnapshot.ifcMeshes) ? ifcSnapshot.ifcMeshes : [];
 
-    // Koordinaten für Georeferenzierung aus dem ersten Bohrpunkt
-    const refPoint = boxReference && boxReference.coords ? boxReference.coords : null;
-    const refLat = refPoint ? refPoint.lat : (boxReference ? boxReference.lat : 51.45);
-    const refLon = refPoint ? refPoint.lng : (boxReference ? boxReference.lon : 14.20);
-    const refNhn = boxReference ? boxReference.nhn : 50.0;
-
-    const defaultMapConversionX = 454057.331;
-    const defaultMapConversionY = 5734617.854;
-    let mapConversionX = defaultMapConversionX;
-    let mapConversionY = defaultMapConversionY;
-
-    if (refPoint) {
-        if (selectedEpsg === '4326') {
-            mapConversionX = refLon;
-            mapConversionY = refLat;
-        } else {
-            const projectedOrigin = resolveCoordsToEpsg(refPoint, selectedEpsg);
-            if (projectedOrigin && Array.isArray(projectedOrigin)) {
-                mapConversionX = projectedOrigin[0];
-                mapConversionY = projectedOrigin[1];
-            }
-        }
-    }
-
-    // Statischer Header und Georeferenzierungs-Geometrie hinzufügen
-    fullIFC += `#1=IFCPROJECT('0000000000000000000001',$,'RUMMZ','Mit diesem Objekt sind die Projektbasisdaten bis inklusive 17 verbunden.',$,$,$,(#2),#9);\n`;
-    fullIFC += `#2=IFCGEOMETRICREPRESENTATIONCONTEXT($,'Model',3,1.E-05,#4,#8);\n`;
-    fullIFC += `#3=IFCGEOMETRICREPRESENTATIONSUBCONTEXT('Body','Model',*,*,*,*,#2,$,.MODEL_VIEW.,$);\n`;
-    fullIFC += `#4=IFCAXIS2PLACEMENT3D(#5,#6,#7);\n`;
-    fullIFC += `#5=IFCCARTESIANPOINT((0.,0.,0.));\n`;
-    fullIFC += `#6=IFCDIRECTION((0.,0.,1.));\n`;
-    fullIFC += `#7=IFCDIRECTION((1.,0.,0.));\n`;
-    fullIFC += `#8=IFCDIRECTION((0.0,1.0));\n`;
-    fullIFC += `#9=IFCUNITASSIGNMENT((#10,#11,#12));\n`;
-    fullIFC += `#10=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);\n`;
-    fullIFC += `#11=IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.);\n`;
-    fullIFC += `#12=IFCSIUNIT(*,.VOLUMEUNIT.,$,.CUBIC_METRE.);\n`;
-    fullIFC += `#13=IFCLOCALPLACEMENT($,#4);\n`;
-    fullIFC += `#14=IFCPROJECTEDCRS('${ifcCrs.identifier}','${ifcCrs.name}','${ifcCrs.datum}',$,'${ifcCrs.method}',${selectedEpsgZone},#10);\n`;
-    fullIFC += `#15=IFCMAPCONVERSION(#2,#14,${mapConversionX.toFixed(3)},${mapConversionY.toFixed(3)},${refNhn.toFixed(2)},1.,0.,1.);\n`;
-
-    const refLatDMS = decimalDegreesToIfcDMS(refLat);
-    const refLonDMS = decimalDegreesToIfcDMS(refLon);
-
-    // Georeferenzierungs-Geometrie (Geomarker)
-    fullIFC += `#16=IFCSITE('0000000000000000000002',$,'0. Georeferenzierung','Dieses Objekt beinhaltet den Geomarker. Der Geomarker zeigt auf die Georeferenzierung dieser IFC-Datei. Das ist immer der erste Bohrpunkt',$,#13,$,$,.PARTIAL.,${refLatDMS},${refLonDMS},${refNhn.toFixed(2)},$,$);\n`;
-    fullIFC += `#17=IFCRELAGGREGATES('0000000000000000000003',$,'Verbindung der Objekte RUMMZ und 0. Georeferenzierung.',$,#1,(#16));\n`;
-    fullIFC += `#18=IFCSURFACESTYLE('Geomarker-Gelb',.BOTH.,(#19));\n`;
-    fullIFC += `#19=IFCSURFACESTYLESHADING(#20,$);\n`;
-    fullIFC += `#20=IFCCOLOURRGB($,1.,1.,0.);\n`;
-    fullIFC += `#21=IFCCARTESIANPOINTLIST3D(((1.69990313053131,1.69990313053131,3.37193894386292),(1.90088465869026E-15,7.60353863476105E-15,5.06902589767952E-15),(-1.69990313053131,1.69990313053131,3.37193894386292),(1.69990313053131,-1.69990313053131,3.37193894386292),(-1.69990313053131,-1.69990313053131,3.37193894386292),(-1.69990313053131,-1.69990313053131,6.74387788772583),(1.69990313053131,-1.69990313053131,6.74387788772583),(-1.69990313053131,1.69990313053131,6.74387788772583),(1.69990313053131,1.69990313053131,6.74387788772583)));\n`;
-    fullIFC += `#22=IFCINDEXEDPOLYGONALFACE((1,2,3));\n`;
-    fullIFC += `#23=IFCINDEXEDPOLYGONALFACE((4,5,2));\n`;
-    fullIFC += `#24=IFCINDEXEDPOLYGONALFACE((2,5,3));\n`;
-    fullIFC += `#25=IFCINDEXEDPOLYGONALFACE((2,1,4));\n`;
-    fullIFC += `#26=IFCINDEXEDPOLYGONALFACE((4,6,5));\n`;
-    fullIFC += `#27=IFCINDEXEDPOLYGONALFACE((6,4,7));\n`;
-    fullIFC += `#28=IFCINDEXEDPOLYGONALFACE((7,8,6));\n`;
-    fullIFC += `#29=IFCINDEXEDPOLYGONALFACE((8,7,9));\n`;
-    fullIFC += `#30=IFCINDEXEDPOLYGONALFACE((9,3,8));\n`;
-    fullIFC += `#31=IFCINDEXEDPOLYGONALFACE((3,9,1));\n`;
-    fullIFC += `#32=IFCINDEXEDPOLYGONALFACE((4,9,7));\n`;
-    fullIFC += `#33=IFCINDEXEDPOLYGONALFACE((9,4,1));\n`;
-    fullIFC += `#34=IFCINDEXEDPOLYGONALFACE((3,6,8));\n`;
-    fullIFC += `#35=IFCINDEXEDPOLYGONALFACE((6,3,5));\n`;
-    fullIFC += `#36=IFCPOLYGONALFACESET(#21,$,(#22,#23,#24,#25,#26,#27,#28,#29,#30,#31,#32,#33,#34,#35),$);\n`;
-    fullIFC += `#37=IFCSTYLEDITEM(#36,(#18),$);\n`;
-    fullIFC += `#38=IFCSHAPEREPRESENTATION(#3,'Body','Tessellation',(#36));\n`;
-    fullIFC += `#39=IFCGEOGRAPHICELEMENT('2BqK1DRG16$faoJUdCgEAN',$,'Geomarker','Hier ist die Markierung der Georeferenzierung.','GIS',#13,#41,$,.TERRAIN.);\n`;
-    fullIFC += `#40=IFCRELCONTAINEDINSPATIALSTRUCTURE('13VANNJ$rAAAWi5V_ENPge',$,$,$,(#39),#16);\n`;
-    fullIFC += `#41=IFCPRODUCTDEFINITIONSHAPE($,$,(#38));\n`;
-
-    const faceMeshes = window.ifcMeshes.filter(mesh => !mesh.userData?.isCylinder);
-    const faceMeshLookup = new Map(faceMeshes
-        .filter(mesh => Number.isInteger(mesh.userData?.boreholeIndex) && Number.isInteger(mesh.userData?.layerIndex))
-        .map(mesh => [`${mesh.userData.boreholeIndex}-${mesh.userData.layerIndex}`, mesh])
-    );
-
-    console.log('buildIfcExport: start', { selectedEpsg, boreholes: window.cardsData?.length, faceMeshes: faceMeshes.length });
-    const _buildIfc_start = (typeof performance !== 'undefined') ? performance.now() : Date.now();
-    let _processedBoreholes = 0;
-
-    window.cardsData.forEach((borehole, boreholeIndex) => {
-        if (boreholeIndex % 5 === 0 || boreholeIndex < 3) console.log(`buildIfcExport: processing borehole ${boreholeIndex + 1}/${window.cardsData.length}`);
-        try {
-            const siteId = getNextIfcEntityId();
-            const relAggId = getNextIfcEntityId();
-            const siteName = `${boreholeIndex + 1}. Bohrung`;
-            const siteDescription = `Die ${boreholeIndex + 1}. Bohrung beinhaltet das ${boreholeIndex + 1}. Bohrloch mit Bohrpfeilern (gemessene Bohrsaeule) und Schichtvolumen (errechnete Ausdehnung)`;
-            const boreholeCoords = borehole.coords || { lat: 51.45, lng: 14.20 };
-            const boreholeLatDMS = decimalDegreesToIfcDMS(boreholeCoords.lat);
-            const boreholeLonDMS = decimalDegreesToIfcDMS(boreholeCoords.lng);
-            const boreholeNhn = typeof borehole.nhn === 'number' ? borehole.nhn : 0.0;
-
-            // IFCSITE für diese Bohrung
-            fullIFC += `#${siteId}=IFCSITE('${generateIFCGUID(siteId)}',$,'${siteName}','${siteDescription}',$,#13,$,$,.PARTIAL.,${boreholeLatDMS},${boreholeLonDMS},${boreholeNhn.toFixed(2)},$,$);\n`;
-            fullIFC += `#${relAggId}=IFCRELAGGREGATES('${generateIFCGUID(relAggId)}',$,'Verbindung der Objekte RUMMZ und ${siteName}',$,#1,(#${siteId}));\n`;
-
-            borehole.layers.forEach((layer, layerIndex) => {
-                const key = `${boreholeIndex}-${layerIndex}`;
-                const layerName = layer.name || `Schicht ${layerIndex + 1}`;
-                const color = layer.color || '#000000';
-                const rgb = hexToRgb(color);
-                const rgbString = rgb ? `${(rgb.r / 255).toFixed(1)},${(rgb.g / 255).toFixed(1)},${(rgb.b / 255).toFixed(1)}` : '0.5,0.5,0.5';
-
-                // Style für diese Schicht
-                const styleId = getNextIfcEntityId();
-                const shadingId = getNextIfcEntityId();
-                const colorId = getNextIfcEntityId();
-                fullIFC += `#${styleId}=IFCSURFACESTYLE('${layerName}',.BOTH.,(#${shadingId}));\n`;
-                fullIFC += `#${shadingId}=IFCSURFACESTYLESHADING(#${colorId},$);\n`;
-                fullIFC += `#${colorId}=IFCCOLOURRGB($,${rgbString});\n`;
-
-                // Bohrpfeiler (Box-Geometrie)
-                const boxGeometries = generateIFCBoxSet([borehole], boxReference, layerIndex);
-                if (boxGeometries.length > 0) {
-                    const boxFaceSetId = boxGeometries[0].faceSetId;
-                    fullIFC += boxGeometries[0].ifcOutput;
-
-                    const shapeRepId = getNextIfcEntityId();
-                    const geoElementId = getNextIfcEntityId();
-                    const relContainedId = getNextIfcEntityId();
-                    const productDefId = getNextIfcEntityId();
-                    const styleItemId = getNextIfcEntityId();
-
-                    fullIFC += `#${shapeRepId}=IFCSHAPEREPRESENTATION(#3,'Body','SurfaceModel',(#${boxFaceSetId}));\n`;
-                    fullIFC += `#${geoElementId}=IFCGEOGRAPHICELEMENT('${generateIFCGUID(geoElementId)}',$,'${layerIndex + 1}. Bohrpfeiler','${layerName}','IfcBorehole',#13,#${productDefId},$,.TERRAIN.);\n`;
-                    fullIFC += `#${relContainedId}=IFCRELCONTAINEDINSPATIALSTRUCTURE('${generateIFCGUID(relContainedId)}',$,$,$,(#${geoElementId}),#${siteId});\n`;
-                    fullIFC += `#${productDefId}=IFCPRODUCTDEFINITIONSHAPE($,$,(#${shapeRepId}));\n`;
-                    fullIFC += `#${styleItemId}=IFCSTYLEDITEM(#${boxFaceSetId},(#${styleId}),'${layerName}');\n`;
-
-                    // Properties für Bohrpfeiler
-                    const propIds = [];
-                    const zTop = borehole.nhn;
-                    const zBottom = borehole.nhn - (layer.height / 100);
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('z-Wert Oberkante der gemessenen NHN in Meter',$,IFCREAL(${zTop.toFixed(2)}),$);\n`;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('z-Wert Unterkante der gemessenen NHN in Meter',$,IFCREAL(${zBottom.toFixed(2)}),$);\n`;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('Maechtigkeit in cm',$,IFCINTEGER(${layer.height || 0}),$);\n`;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('Substanz',$,IFCTEXT('${layerName}'),$);\n`;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('Farbe als Hex-Wert',$,IFCTEXT('${rgbString}'),$);\n`;
-                    // Grundfläche und Volumen für Bohrpfeiler (1x1m Box)
-                    const boxArea = 1.0; // 1m x 1m = 1 m²
-                    const boxVolume = boxArea * (layer.height / 100); // 1 m² × Tiefe in Metern
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('Grundflaeche in m2',$,IFCREAL(${boxArea.toFixed(2)}),$);\n`;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('Volumen in m3',$,IFCREAL(${boxVolume.toFixed(2)}),$);\n`;
-
-                    const propSetId = getNextIfcEntityId();
-                    fullIFC += `#${propSetId}=IFCPROPERTYSET('${generateIFCGUID(propSetId)}',$,'Eigenschaften des ${boreholeIndex + 1}. Bohrpfeilers',$,(${propIds.map(id => `#${id}`).join(',')}));\n`;
-                    const relPropId = getNextIfcEntityId();
-                    fullIFC += `#${relPropId}=IFCRELDEFINESBYPROPERTIES('${generateIFCGUID(relPropId)}',$,$,$,(#${geoElementId}),#${propSetId});\n`;
-                }
-
-                // Schichtvolumen (Face-Mesh)
-                const mesh = faceMeshLookup.get(key);
-                if (mesh) {
-                    const ifcData = generateIFCFaceSet(mesh, window.ifcOrigin);
-                    const faceSetId = ifcData.faceSetId;
-                    fullIFC += ifcData.ifcOutput;
-
-                    const shapeRepId = getNextIfcEntityId();
-                    const geoElementId = getNextIfcEntityId();
-                    const relContainedId = getNextIfcEntityId();
-                    const productDefId = getNextIfcEntityId();
-                    const styleItemId = getNextIfcEntityId();
-
-                    fullIFC += `#${shapeRepId}=IFCSHAPEREPRESENTATION(#3,'Body','SurfaceModel',(#${faceSetId}));\n`;
-                    fullIFC += `#${geoElementId}=IFCGEOGRAPHICELEMENT('${generateIFCGUID(geoElementId)}',$,'${layerIndex + 1}. Schichtvolumen','${layerName}','IfcGeotechnicalStratum',#13,#${productDefId},$,.TERRAIN.);\n`;
-                    fullIFC += `#${relContainedId}=IFCRELCONTAINEDINSPATIALSTRUCTURE('${generateIFCGUID(relContainedId)}',$,$,$,(#${geoElementId}),#${siteId});\n`;
-                    fullIFC += `#${productDefId}=IFCPRODUCTDEFINITIONSHAPE($,$,(#${shapeRepId}));\n`;
-                    fullIFC += `#${styleItemId}=IFCSTYLEDITEM(#${faceSetId},(#${styleId}),'${layerName}');\n`;
-
-                    // Properties für Schichtvolumen (vereinfacht, da Volumenberechnung komplex ist)
-                    const propIds = [];
-                    const zTop = borehole.nhn;
-                    const zBottom = borehole.nhn - (layer.height / 100);
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('z-Wert Oberkante der gemessenen NHN in Meter',$,IFCREAL(${zTop.toFixed(2)}),$);\n`;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('z-Wert Unterkante der gemessenen NHN in Meter',$,IFCREAL(${zBottom.toFixed(2)}),$);\n`;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('Maechtigkeit in cm',$,IFCINTEGER(${layer.height || 0}),$);\n`;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('Substanz',$,IFCTEXT('${layerName}'),$);\n`;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('Farbe als Hex-Wert',$,IFCTEXT('${rgbString}'),$);\n`;
-                    // Grundfläche und Volumen aus mesh.userData
-                    const layerArea = mesh.userData?.layerArea || 0;
-                    const layerVolume = mesh.userData?.layerVolume || 0;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('Grundflaeche in m2',$,IFCREAL(${layerArea.toFixed(2)}),$);\n`;
-                    propIds.push(getNextIfcEntityId());
-                    fullIFC += `#${propIds[propIds.length - 1]}=IFCPROPERTYSINGLEVALUE('Volumen in m3',$,IFCREAL(${layerVolume.toFixed(2)}),$);\n`;
-
-                    const propSetId = getNextIfcEntityId();
-                    fullIFC += `#${propSetId}=IFCPROPERTYSET('${generateIFCGUID(propSetId)}',$,'Eigenschaften des ${boreholeIndex + 1}. Schichtvolumens',$,(${propIds.map(id => `#${id}`).join(',')}));\n`;
-                    const relPropId = getNextIfcEntityId();
-                    fullIFC += `#${relPropId}=IFCRELDEFINESBYPROPERTIES('${generateIFCGUID(relPropId)}',$,$,$,(#${geoElementId}),#${propSetId});\n`;
-                }
-            });
-            _processedBoreholes++;
-        } catch (err) {
-            console.error(`buildIfcExport: error processing borehole ${boreholeIndex}`, err);
-            throw err;
-        }
-    });
-
-    const _buildIfc_end = (typeof performance !== 'undefined') ? performance.now() : Date.now();
-    console.log(`buildIfcExport: completed in ${( _buildIfc_end - _buildIfc_start).toFixed(1)} ms, processed ${_processedBoreholes} boreholes, ifc length ${fullIFC.length}`);
-
-    return fullIFC;
+    return {
+        cardsData: exportCardsData,
+        ifcMeshes: exportIfcMeshes,
+        ifcOrigin: ifcSnapshot.ifcOrigin || { x: 0, y: 0, z: 0 },
+        boxReference: exportCardsData.length > 0 ? exportCardsData[0] : null,
+        selectedEpsg: document.getElementById('dashboard-ifc-epsg')?.value || dashboardSelectedEPSG || '4326',
+        fileNameBase: getIfcDownloadBaseName(),
+        snapshotSource: ifcSnapshot.source || 'unknown'
+    };
 }
 
 // IFC-Download (Dashboard IFC button)
 async function performIfcExport() {
-    console.log('performIfcExport: started', { ifcMeshesLength: window.ifcMeshes?.length });
+    const getSnapshotMeshCount = () => {
+        const snapshot = getIfcExportSnapshot();
+        return snapshot && Array.isArray(snapshot.ifcMeshes) ? snapshot.ifcMeshes.length : 0;
+    };
+
+    const initialSnapshot = getIfcExportSnapshot();
+    console.log('performIfcExport: started', {
+        ifcMeshesLength: getSnapshotMeshCount(),
+        snapshotSource: initialSnapshot ? initialSnapshot.source : 'missing'
+    });
     const btnEl = document.getElementById('btn-toggle-elements');
     if (btnEl) btnEl.disabled = true;
     try {
         // If IFC meshes are not yet present, trigger visualisation build and wait briefly
-        if (!window.ifcMeshes || window.ifcMeshes.length === 0) {
+        if (getSnapshotMeshCount() === 0) {
             console.log('performIfcExport: no ifcMeshes found, triggering visualisation build');
             try {
                 triggerVisualisationUpdate();
@@ -2311,36 +2259,50 @@ async function performIfcExport() {
                 console.warn('performIfcExport: triggerVisualisationUpdate failed', e);
             }
 
-            // Wait up to 5s for window.ifcMeshes to be populated
+            // Wait up to 5s for the snapshot to contain IFC meshes.
             const start = Date.now();
             const timeout = 5000;
-            while ((!window.ifcMeshes || window.ifcMeshes.length === 0) && (Date.now() - start) < timeout) {
+            while (getSnapshotMeshCount() === 0 && (Date.now() - start) < timeout) {
                 // yield to event loop
                 // eslint-disable-next-line no-await-in-loop
                 await new Promise(r => setTimeout(r, 150));
             }
-            console.log('performIfcExport: wait complete, ifcMeshesLength now', window.ifcMeshes?.length || 0);
-            if (!window.ifcMeshes || window.ifcMeshes.length === 0) {
+            console.log('performIfcExport: wait complete, ifcMeshesLength now', getSnapshotMeshCount());
+            if (getSnapshotMeshCount() === 0) {
                 alert('Keine IFC-Geometrien verfügbar. Bitte zuerst die Visualisierung laden oder warte einen Moment.');
                 return;
             }
         }
         
         // proceed with IFC module import and build
-        const { generateIFCFaceSet, generateIFCBoxSet, resetIfcEntityId, getNextIfcEntityId } = await import('./ifc.js');
-        console.log('performIfcExport: ifc module imported');
+        const [ifcModule, ifcBuilderModule] = await Promise.all([
+            import('./ifc.js'),
+            import('./ifc-export-builder.js')
+        ]);
+        const { generateIFCFaceSet, generateIFCBoxSet, resetIfcEntityId, getNextIfcEntityId } = ifcModule;
+        const { buildIfcExport, createIfcDocumentHeader, appendIfcDocumentFooter } = ifcBuilderModule;
+        console.log('performIfcExport: ifc modules imported');
         resetIfcEntityId(); // Reset IFC entity IDs
-        let fullIFC = 'ISO-10303-21;\nHEADER;\nFILE_DESCRIPTION((\'ViewDefinition [DesignTransferView]\'), \'2;1\');\nFILE_NAME(\'rummz.ifc\',\'2025-01-01T12:00:00\',(\'Author\'),(\'Organization\'),\'IFC4\',\'RUMMZ-Version-1-Prototyp\',\'Generated by RUMMZ\');\nFILE_SCHEMA((\'IFC4\'));\nENDSEC;\nDATA;\n';
-        const boxReference = window.cardsData && window.cardsData.length > 0 ? window.cardsData[0] : null;
-        const selectedEpsg = document.getElementById('dashboard-ifc-epsg')?.value || dashboardSelectedEPSG || '4326';
+        let fullIFC = createIfcDocumentHeader();
+        const exportContext = createIfcExportContext();
         // buildIfcExport may be CPU/memory heavy for large datasets; log progress
-        console.log('performIfcExport: calling buildIfcExport', { boreholes: window.cardsData?.length });
-        fullIFC = buildIfcExport(fullIFC, boxReference, generateIFCFaceSet, generateIFCBoxSet, getNextIfcEntityId, selectedEpsg);
-        fullIFC += 'ENDSEC;\nEND-ISO-10303-21;\n';
+        console.log('performIfcExport: calling buildIfcExport', {
+            boreholes: exportContext.cardsData.length,
+            snapshotSource: exportContext.snapshotSource
+        });
+        fullIFC = buildIfcExport({
+            fullIFC,
+            exportContext,
+            generateIFCFaceSet,
+            generateIFCBoxSet,
+            getNextIfcEntityId,
+            ifcProjectedCRSDefinitions,
+            resolveCoordsToEpsg,
+            hexToRgb
+        });
+        fullIFC = appendIfcDocumentFooter(fullIFC);
         const blob = new Blob([fullIFC], { type: 'text/plain' });
-        const projectTitleInput = document.getElementById('dashboard-project-title');
-        const baseName = projectTitleInput && projectTitleInput.value.trim() ? projectTitleInput.value.trim().replace(/[^\w\-]+/g,'_') : 'rummz_model';
-        const fileName = `${baseName}.ifc`;
+        const fileName = `${exportContext.fileNameBase}.ifc`;
 
         if (navigator.msSaveBlob) {
             navigator.msSaveBlob(blob, fileName);
@@ -2382,9 +2344,4 @@ document.addEventListener('click', (e) => {
     } catch (err) {
         console.error('Delegated IFC click handler error:', err);
     }
-});
-
-// Project title input handler
-document.getElementById('dashboard-project-title').addEventListener('input', (e) => {
-    projectTitle = e.target.value;
 });

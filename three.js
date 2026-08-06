@@ -2,24 +2,168 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Delaunay } from 'd3-delaunay';
 import { updateCharts } from './chart.js';
-import { OBJExporter } from "three/examples/jsm/exporters/OBJExporter.js";
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
-import { analyzeGeometry, generateIFCFaceSet, generateIFCBoxSet } from './ifc.js';
+
+const visualisationRuntime = {
+  scene: null,
+  renderer: null,
+  camera: null,
+  controls: null,
+  container: null,
+  animationFrameId: null,
+  rayHandlers: null
+}
+
+function disposeMaterial(material) {
+  if (!material) return;
+  if (Array.isArray(material)) {
+    material.forEach(disposeMaterial);
+    return;
+  }
+  if (typeof material.dispose === 'function') {
+    material.dispose();
+  }
+}
+
+function disposeObjectDeep(obj) {
+  if (!obj) return;
+  if (obj.children && obj.children.length > 0) {
+    obj.children.slice().forEach(child => {
+      disposeObjectDeep(child);
+      obj.remove(child);
+    });
+  }
+  if (obj.geometry && typeof obj.geometry.dispose === 'function') {
+    obj.geometry.dispose();
+  }
+  disposeMaterial(obj.material);
+}
+
+function teardownVisualisationRuntime() {
+  if (visualisationRuntime.animationFrameId !== null) {
+    cancelAnimationFrame(visualisationRuntime.animationFrameId);
+    visualisationRuntime.animationFrameId = null;
+  }
+
+  const container = visualisationRuntime.container;
+  const handlers = visualisationRuntime.rayHandlers;
+  if (container && handlers) {
+    container.removeEventListener('pointerdown', handlers.down);
+    container.removeEventListener('pointermove', handlers.move);
+    container.removeEventListener('pointerup', handlers.up);
+    container.removeEventListener('pointercancel', handlers.up);
+    if (container._rummz_ray_handlers === handlers) {
+      delete container._rummz_ray_handlers;
+    }
+  }
+  visualisationRuntime.rayHandlers = null;
+
+  if (visualisationRuntime.controls && typeof visualisationRuntime.controls.dispose === 'function') {
+    visualisationRuntime.controls.dispose();
+  }
+  visualisationRuntime.controls = null;
+
+  if (visualisationRuntime.scene) {
+    disposeObjectDeep(visualisationRuntime.scene);
+  }
+  visualisationRuntime.scene = null;
+
+  if (visualisationRuntime.renderer) {
+    if (visualisationRuntime.renderer.domElement && visualisationRuntime.renderer.domElement.parentNode) {
+      visualisationRuntime.renderer.domElement.parentNode.removeChild(visualisationRuntime.renderer.domElement);
+    }
+    visualisationRuntime.renderer.dispose();
+    if (typeof visualisationRuntime.renderer.forceContextLoss === 'function') {
+      visualisationRuntime.renderer.forceContextLoss();
+    }
+  }
+  visualisationRuntime.renderer = null;
+  visualisationRuntime.camera = null;
+  visualisationRuntime.container = null;
+  window.scene = null;
+}
+
+function setBoreholeMarkersVisible(visible) {
+  if (window.boreholeMarkerGroup) {
+    window.boreholeMarkerGroup.visible = visible;
+  }
+  window.boreholeMarkersVisible = visible;
+}
+
+window.setBoreholeMarkersVisible = setBoreholeMarkersVisible;
+
+if (!window.__rummzToggleBoreholeMarkersListenerBound) {
+  window.addEventListener('toggleBoreholeMarkers', function(event) {
+    setBoreholeMarkersVisible(!!event.detail?.visible);
+  });
+  window.__rummzToggleBoreholeMarkersListenerBound = true;
+}
+
+/**
+ * IFC snapshot contract shared with script.js.
+ * @typedef {Object} RummzIfcSnapshot
+ * @property {Array} cardsData
+ * @property {Array} ifcMeshes
+ * @property {{x:number,y:number,z:number}} ifcOrigin
+ * @property {number} updatedAt
+ */
+
+/**
+ * Builds the current IFC export snapshot payload.
+ * @param {Array} cardsData
+ * @param {Array} ifcMeshes
+ * @param {{x:number,y:number,z:number}} ifcOrigin
+ * @returns {RummzIfcSnapshot}
+ */
+function buildRummzIfcSnapshot(cardsData, ifcMeshes, ifcOrigin) {
+  return {
+    cardsData,
+    ifcMeshes: Array.isArray(ifcMeshes) ? ifcMeshes : [],
+    ifcOrigin: ifcOrigin || { x: 0, y: 0, z: 0 },
+    updatedAt: Date.now()
+  };
+}
+
+function publishRummzIfcSnapshot(cardsData, ifcMeshes, ifcOrigin) {
+  window.rummzIfcSnapshot = buildRummzIfcSnapshot(cardsData, ifcMeshes, ifcOrigin);
+}
+
+/**
+ * Contract reader for external consumers (e.g. script.js IFC export).
+ * @returns {RummzIfcSnapshot|null}
+ */
+window.getRummzIfcSnapshot = function() {
+  return window.rummzIfcSnapshot || null;
+};
 
 function updateVisualisation (cardsData) {
+  teardownVisualisationRuntime();
+
+  if (!Array.isArray(cardsData) || cardsData.length === 0) {
+    publishRummzIfcSnapshot([], [], { x: 0, y: 0, z: 0 });
+    updateCharts([], {});
+    return;
+  }
 
   // VALIDATE ONLY THE DATA FOR VISUALIZATION
 
-  // Speichere Bohrdaten global für IFC-Export
-  window.cardsData = cardsData;
+  function isRenderableLayer(layer) {
+    return !!layer
+      && typeof layer.name === 'string'
+      && layer.name.trim() !== ''
+      && typeof layer.height === 'number'
+      && layer.height > 0
+      && typeof layer.color === 'string';
+  }
 
   function validateBorehole(borehole) {
     // CONTROL MAIN DATA
     if (
+      !borehole ||
       typeof borehole.coords !== "object" ||
+      borehole.coords === null ||
       typeof borehole.nhn !== "number" ||
-      !Array.isArray(borehole.layers) ||
-      borehole.layers.length === 0
+      !Array.isArray(borehole.layers)
     ) {
       return false;
     }
@@ -30,66 +174,40 @@ function updateVisualisation (cardsData) {
     ) {
       return false;
     }
-    // CONTROL LAYERS
-    for (const layer of borehole.layers) {
-      if (
-        //typeof layer.id !== "string" ||
-        typeof layer.name !== "string" ||
-        typeof layer.height !== "number" ||
-        //layer.height <= 0 ||
-        typeof layer.color !== "string"
-      ) {
-        return false;
+    return borehole.layers.some(isRenderableLayer);
+  }
+
+  const renderCardsData = cardsData
+    .map(borehole => {
+      if (!borehole || !Array.isArray(borehole.layers)) {
+        return null;
       }
-    }
-    return true;
-  }
 
-  function validatecardsData(cardsData) {
-    return cardsData.every(validateBorehole);
-  }
-
-  if (!validatecardsData(cardsData)) {
-    // alert("Fehler: Mindestens ein Bohrkern ist ungültig!");
-  } else {
-
-  // CLEAN THREE.JS-SCENE
-
-  function disposeObject(obj) {
-    // GEOM
-    if (obj.geometry) obj.geometry.dispose();
-
-    // MATERIAL
-    if (obj.material) {
-      if (Array.isArray(obj.material)) {
-        obj.material.forEach(mat => mat.dispose());
-      } else {
-        obj.material.dispose();
+      const renderableLayers = borehole.layers.filter(isRenderableLayer);
+      if (renderableLayers.length === 0) {
+        return null;
       }
-    }
-    // GROUP
-    if (obj.children) {
-      obj.children.forEach(child => disposeObject(child));
-    }
+
+      return {
+        ...borehole,
+        layers: renderableLayers
+      };
+    })
+    .filter(validateBorehole);
+
+  if (renderCardsData.length === 0) {
+    publishRummzIfcSnapshot([], [], { x: 0, y: 0, z: 0 });
+    updateCharts([], {});
+    return;
   }
 
-  function clearEntireScene() {
-    while (scene.children.length > 0) {
-      const obj = scene.children[0];
-      scene.remove(obj);
-      disposeObject(obj);
-    }
-  }
+  const container = document.getElementById('dashboard-map');
+  if (!container) return;
 
   // INITIALIZE THREE.JS
   const scene = new THREE.Scene();
   scene.background = null;
   window.scene = scene; // GLOBAL FOR EXPORT
-
-  clearEntireScene();
-
-  const container = document.getElementById('dashboard-map');
-  if (!container) return;
 
   const existingCanvas = container.querySelector('canvas');
   if (existingCanvas) {
@@ -117,14 +235,20 @@ function updateVisualisation (cardsData) {
   // ORBIT-CONTROLS
   const controls = new OrbitControls(camera, renderer.domElement);
 
+  visualisationRuntime.scene = scene;
+  visualisationRuntime.renderer = renderer;
+  visualisationRuntime.camera = camera;
+  visualisationRuntime.controls = controls;
+  visualisationRuntime.container = container;
+
   // Lights
   const dir = new THREE.DirectionalLight(0xffffff, 0.9);
   scene.add(dir);
   scene.add(new THREE.AmbientLight(0xffffff,0.4));
     
   // GEO-CENTER DER BOHRUNGEN ALS LAT/LON
-  const refLat = cardsData.reduce((s,b)=>s+b.coords.lat,0)/cardsData.length;
-  const refLon = cardsData.reduce((s,b)=>s+b.coords.lng,0)/cardsData.length;
+  const refLat = renderCardsData.reduce((s,b)=>s+b.coords.lat,0)/renderCardsData.length;
+  const refLon = renderCardsData.reduce((s,b)=>s+b.coords.lng,0)/renderCardsData.length;
 
   // TRANSFORM LAT/LON TO METER (EQUI APPROX)
   // 1° Lat = ca. 111320 m
@@ -143,7 +267,7 @@ function updateVisualisation (cardsData) {
 
   // GROUND GRID
   // CENTERING GRID
-  const boreholeCenters = cardsData.map(bh => {
+  const boreholeCenters = renderCardsData.map(bh => {
     const depth = bh.layers.reduce((sum, layer) => sum + layer.height / 100, 0);
     return bh.nhn - depth / 2;
   });
@@ -152,7 +276,7 @@ function updateVisualisation (cardsData) {
   const midNHN = (minNHN + maxNHN) / 2;
 
   // CALC X/Z-POS OF DRILL CORES
-  const positions = cardsData.map(bh => latLonToXZ(bh.coords.lat, bh.coords.lng));
+  const positions = renderCardsData.map(bh => latLonToXZ(bh.coords.lat, bh.coords.lng));
 
   // CACL MIN/MAX FOR X AND Z (Y IS UP)
   const xs = positions.map(p => p.x);
@@ -256,7 +380,7 @@ function updateVisualisation (cardsData) {
   window.boreholeMarkerGroup = boreholeMarkerGroup;
   window.boreholeMarkersVisible = false;
 
-  cardsData.forEach((bh, bhIndex) => {
+  renderCardsData.forEach((bh, bhIndex) => {
     const { x, z } = latLonToXZ(bh.coords.lat, bh.coords.lng);
     const markerRoot = new THREE.Group();
     markerRoot.position.set(x, bh.nhn + 0.25, z);
@@ -374,7 +498,7 @@ function updateVisualisation (cardsData) {
   // ADD VOLUMES TO SCENE
       
   // PREPARE VORONOIS
-  const points = cardsData.map(b => {
+  const points = renderCardsData.map(b => {
     const { x, z } = latLonToXZ(b.coords.lat, b.coords.lng);
     return [x, z];
   });
@@ -414,18 +538,19 @@ function updateVisualisation (cardsData) {
   // CREATE MESHS
   async function buildModel() {
     const volumes = {};
-    window.ifcMeshes = []; // Sammle Meshes für IFC-Export
+    const ifcMeshes = []; // Sammle Meshes für IFC-Export
     // Berechne Origin für IFC (erster Bohrpunkt)
-    const firstBorehole = cardsData[0];
+    const firstBorehole = renderCardsData[0];
     const originXZ = latLonToXZ(firstBorehole.coords.lat, firstBorehole.coords.lng);
-    window.ifcOrigin = {
+    const ifcOrigin = {
       x: originXZ.x,
       y: firstBorehole.nhn,
       z: originXZ.z
     };
+    publishRummzIfcSnapshot(renderCardsData, ifcMeshes, ifcOrigin);
     
     // Zylinder-Meshes sammeln und hinzufügen
-    cardsData.forEach((bh, bhIndex) => {
+    renderCardsData.forEach((bh, bhIndex) => {
       const p = latLonToXZ(bh.coords.lat, bh.coords.lng);
       const grp = createBoreholeGroup(p.x, p.z, bh.layers, 0.04, bhIndex, bh.title || '');
       grp.name = bh.id;
@@ -434,13 +559,13 @@ function updateVisualisation (cardsData) {
       scene.add(grp);
       // WICHTIG: Zylindermeshes zu IFC-Export-Array hinzufügen
       grp.children.forEach(cylinderMesh => {
-        window.ifcMeshes.push(cylinderMesh);
+        ifcMeshes.push(cylinderMesh);
       });
       console.log(grp);
     });
     
-    for (let i = 0; i < cardsData.length; i++) {
-      const borehole = cardsData[i];
+    for (let i = 0; i < renderCardsData.length; i++) {
+      const borehole = renderCardsData[i];
       const rawCell = voronoi.cellPolygon(i);
       const cell = sortPolygonPoints(rawCell);
 
@@ -499,33 +624,22 @@ function updateVisualisation (cardsData) {
         mesh.position.set(0, yOffset, 0);
         scene.add(mesh);
 
-        window.ifcMeshes.push(mesh); // Mesh für IFC sammeln
+        ifcMeshes.push(mesh); // Mesh für IFC sammeln
 
         yOffset -= layer.height / 100;
       }
     }
-    updateCharts(cardsData, volumes);
+    publishRummzIfcSnapshot(renderCardsData, ifcMeshes, ifcOrigin);
+    updateCharts(renderCardsData, volumes);
   }
   
   buildModel();
       
   function animate(){
-    requestAnimationFrame(animate);
-      //controls.update();
-      renderer.render(scene, camera);
-    }
-
-  function setBoreholeMarkersVisible(visible) {
-    if (window.boreholeMarkerGroup) {
-      window.boreholeMarkerGroup.visible = visible;
-    }
-    window.boreholeMarkersVisible = visible;
+    visualisationRuntime.animationFrameId = requestAnimationFrame(animate);
+    //controls.update();
+    renderer.render(scene, camera);
   }
-
-  window.setBoreholeMarkersVisible = setBoreholeMarkersVisible;
-  window.addEventListener('toggleBoreholeMarkers', function(event) {
-    setBoreholeMarkersVisible(!!event.detail?.visible);
-  });
 
   // RAYCASTER
   // --- Raycaster / Pointer interaction (adds selection highlight + info overlay) ---
@@ -669,15 +783,15 @@ function updateVisualisation (cardsData) {
         if (group && group.boreholeIndex !== undefined) boreholeIndex = group.boreholeIndex;
       }
       const bhIndex = (typeof boreholeIndex === 'number') ? boreholeIndex : null;
-      const bhData = (bhIndex !== null && cardsData[bhIndex]) ? cardsData[bhIndex] : null;
+      const bhData = (bhIndex !== null && renderCardsData[bhIndex]) ? renderCardsData[bhIndex] : null;
       const boreholeNumber = (bhIndex !== null) ? (bhIndex + 1) : 'n/a';
       const boreholeTitle = bhData ? (bhData.title || '') : '';
 
       // Layer info: prefer explicit layerName/thickness/volume from userData
-      const layerName = user.layerName || user.layerName || (user.layerIndex !== undefined && bhData ? (bhData.layers[user.layerIndex] && bhData.layers[user.layerIndex].name) : 'n/a');
+      const layerName = user.layerName || (user.layerIndex !== undefined && bhData ? (bhData.layers[user.layerIndex] && bhData.layers[user.layerIndex].name) : 'n/a');
       const layerThickness = (user.thickness || user.layerThickness) ? (user.thickness || user.layerThickness) : (user.layerIndex !== undefined && bhData ? (bhData.layers[user.layerIndex] && (bhData.layers[user.layerIndex].height/100)) : undefined);
-      let layerVolume = user.layerVolume || user.layerVolume;
-      let layerArea = user.layerArea || user.layerArea;
+      let layerVolume = user.layerVolume;
+      let layerArea = user.layerArea;
       if (layerVolume === undefined && user.layerIndex !== undefined && bhData) {
         // compute cylinder volume (if this was cylinder)
         const r = user.radius || 0.04;
@@ -736,6 +850,7 @@ function updateVisualisation (cardsData) {
     container.addEventListener('pointerup', handlers.up);
     container.addEventListener('pointercancel', handlers.up);
     container._rummz_ray_handlers = handlers;
+    visualisationRuntime.rayHandlers = handlers;
   }
 
   // initialize listeners
@@ -800,15 +915,13 @@ function updateVisualisation (cardsData) {
   }
     */
 
-};
-
 // Export scene -> GLB (binary glTF)
 window.exportGeometriesToGLB = function(filenameBase = 'rummz_geometries') {
     if (typeof THREE === 'undefined' || typeof GLTFExporter === 'undefined') {
         throw new Error('three.js oder GLTFExporter nicht geladen.');
     }
 
-    if (typeof window.scene === 'undefined') {
+    if (!window.scene) {
         throw new Error('Keine globale scene gefunden (window.scene).');
     }
 
@@ -862,9 +975,12 @@ window.exportGeometriesToGLB = function(filenameBase = 'rummz_geometries') {
     });
 };
 
-window.addEventListener('updateVisualisation', function(event) {
-    const { cardsData } = event.detail;
+if (!window.__rummzUpdateVisualisationListenerBound) {
+  window.addEventListener('updateVisualisation', function(event) {
+    const cardsData = event?.detail?.cardsData;
     updateVisualisation(cardsData);
-});
+  });
+  window.__rummzUpdateVisualisationListenerBound = true;
+}
 
 //updateVisualisation (cardsData)

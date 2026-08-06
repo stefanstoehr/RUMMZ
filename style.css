@@ -11,6 +11,7 @@
   --color-text-lighter: #6c757d;
   --color-danger: #dc3545;
   --color-success: #28a745;
+  --color-warning: #fd7e14;
   --color-success-hover: #42db63;
   --color-bg-light: #e9ecef;
   --color-shadow: rgba(0,0,0,0.05);
@@ -311,7 +312,28 @@ main {
   font-size: 1.1rem;
   display: flex;
   align-items: center;
+  gap: 0.5rem;
   line-height: 1.2;
+}
+
+.card-render-status {
+  flex: 0 0 auto;
+  font-size: 1rem;
+  line-height: 1;
+  opacity: 0.95;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.card-render-status--full {
+  color: var(--color-success);
+}
+
+.card-render-status--partial {
+  color: var(--color-warning);
+}
+
+.card-render-status--none {
+  color: var(--color-danger);
 }
 
 .card-header > .bi-fullscreen {
@@ -743,16 +765,20 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus {
   transform: translateY(0);
 }
 
-.coord-label-wrap:hover .coord-tooltip:not(.coord-tooltip-dismissed),
-.coord-label-wrap:focus-within .coord-tooltip:not(.coord-tooltip-dismissed) {
+.coord-info-btn:hover + .coord-tooltip:not(.coord-tooltip-dismissed),
+.coord-info-btn:focus-visible + .coord-tooltip:not(.coord-tooltip-dismissed),
+.coord-tooltip:hover:not(.coord-tooltip-dismissed),
+.coord-tooltip:focus-within:not(.coord-tooltip-dismissed) {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
 }
 
 .coord-tooltip-center.is-visible,
-.coord-label-wrap:hover .coord-tooltip-center:not(.coord-tooltip-dismissed),
-.coord-label-wrap:focus-within .coord-tooltip-center:not(.coord-tooltip-dismissed) {
+.coord-info-btn:hover + .coord-tooltip-center:not(.coord-tooltip-dismissed),
+.coord-info-btn:focus-visible + .coord-tooltip-center:not(.coord-tooltip-dismissed),
+.coord-tooltip-center:hover:not(.coord-tooltip-dismissed),
+.coord-tooltip-center:focus-within:not(.coord-tooltip-dismissed) {
   transform: translate(-45%, 0);
 }
 

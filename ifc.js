@@ -1,5 +1,5 @@
 ﻿/**
- * IFC Export Helper Module
+ * IFC Export Helper Module für Geometrien aus Three.js-Szene
  * 
  * Verarbeitet Three.js Geometrien für IFC-Export mit korrekter Georeferenzierung:
  * 1. Extrahiert Eckpunkte aus Three.js-Szene
@@ -23,11 +23,14 @@ export function getNextIfcEntityId() {
   return nextIfcEntityId++;
 }
 
-export function analyzeGeometry(mesh) {
+/*
+function analyzeGeometry(mesh) {
+*/
   /**
    * Analysiert eine Three.js-Geometrie und zeigt Statistiken
    * für Debugging und Verifikation der Geometrie-Struktur
    */
+/*
   const geometry = mesh.geometry;
   const posCount = geometry.attributes.position.count;
   const indexCount = geometry.index ? geometry.index.count : 0;
@@ -46,6 +49,7 @@ export function analyzeGeometry(mesh) {
   console.log(`  Tatsächlich eindeutige Koordinaten: ${uniqueVertices.size}`);
   console.log(`  Duplikate: ${posCount - uniqueVertices.size} (für Normalen/Texturen)`);
 }
+*/
 
 function extractVertices(mesh) {
   /**
@@ -85,6 +89,27 @@ function extractFaces(mesh) {
     }
   }
   return faces;
+}
+
+function buildIfcFaceSetString(vertices, faces) {
+  let ifcOutput = '';
+
+  const pointListId = getNextIfcEntityId();
+  ifcOutput += `#${pointListId}=IFCCARTESIANPOINTLIST3D((`;
+  ifcOutput += vertices.map(v => `(${v[0].toFixed(2)},${v[1].toFixed(2)},${v[2].toFixed(2)})`).join(',');
+  ifcOutput += `));\n`;
+
+  const faceIds = [];
+  faces.forEach(face => {
+    const faceId = getNextIfcEntityId();
+    ifcOutput += `#${faceId}=IFCINDEXEDPOLYGONALFACE((${face.join(',')}));\n`;
+    faceIds.push(`#${faceId}`);
+  });
+
+  const faceSetId = getNextIfcEntityId();
+  ifcOutput += `#${faceSetId}=IFCPOLYGONALFACESET(#${pointListId},$,(${faceIds.join(',')}),$);\n`;
+
+  return { ifcOutput, faceSetId };
 }
 
 export function generateIFCFaceSet(mesh, origin = { x: 0, y: 0, z: 0 }) {
@@ -151,32 +176,15 @@ export function generateIFCFaceSet(mesh, origin = { x: 0, y: 0, z: 0 }) {
   );
 
   // SCHRITT 5: Generiere IFC-Ausgabe
-  let ifcOutput = '';
-  
-  // IFCCARTESIANPOINTLIST3D: Alle eindeutigen Eckpunkte
-  const pointListId = getNextIfcEntityId();
-  ifcOutput += `#${pointListId}=IFCCARTESIANPOINTLIST3D((`;
-  ifcOutput += uniqueVertices.map(v => `(${v[0].toFixed(2)},${v[1].toFixed(2)},${v[2].toFixed(2)})`).join(',');
-  ifcOutput += `));\n`;
-
-  // IFCINDEXEDPOLYGONALFACE: Alle Flächen, referenzieren Eckpunkte via Indizes
-  const faceIds = [];
-  faces.forEach(face => {
-    const faceId = getNextIfcEntityId();
-    ifcOutput += `#${faceId}=IFCINDEXEDPOLYGONALFACE((${face.join(',')}));\n`;
-    faceIds.push(`#${faceId}`);
-  });
-
-  // IFCPOLYGONALFACESET: Container für alle Flächen (komplette Geometrie)
-  const faceSetId = getNextIfcEntityId();
-  ifcOutput += `#${faceSetId}=IFCPOLYGONALFACESET(#${pointListId},$,(${faceIds.join(',')}),$);\n`;
+  const { ifcOutput, faceSetId } = buildIfcFaceSetString(uniqueVertices, faces);
 
   // Logging für Verifikation
+  /*
   console.log(`[IFC FACESET] Layer: ${mesh.userData?.layerName || 'Unknown'}`);
   console.log(`  Eindeutige Vertices: ${uniqueVertices.length}`);
   console.log(`  Faces/Dreiecke: ${faces.length}`);
   console.log(`  Origin (Georeferenz): (${origin.x.toFixed(2)}, ${origin.y.toFixed(2)}, ${origin.z.toFixed(2)})`);
-  console.log(ifcOutput);
+  */
 
   return { vertices: uniqueVertices, faces, ifcOutput, faceSetId };
 }
@@ -277,25 +285,8 @@ export function generateIFCBoxSet(boreholes, referenceBorehole = boreholes[0], l
       ];
 
       // IFC-Ausgabe für diese einzelne Schicht generieren
-      let ifcOutput = '';
-
-      // IFCCARTESIANPOINTLIST3D: Alle Eckpunkte dieser Schicht
-      const pointListId = getNextIfcEntityId();
-      ifcOutput += `#${pointListId}=IFCCARTESIANPOINTLIST3D((`;
-      ifcOutput += boxVertices.map(v => `(${v[0].toFixed(2)},${v[1].toFixed(2)},${v[2].toFixed(2)})`).join(',');
-      ifcOutput += `));\n`;
-
-      // IFCINDEXEDPOLYGONALFACE: Alle Flächen dieser Schicht
-      const faceIds = [];
-      boxFaces.forEach(face => {
-        const faceId = getNextIfcEntityId();
-        ifcOutput += `#${faceId}=IFCINDEXEDPOLYGONALFACE((${face.map(idx => idx + 1).join(',')}));\n`;
-        faceIds.push(`#${faceId}`);
-      });
-
-      // IFCPOLYGONALFACESET: Container für diese Schicht
-      const faceSetId = getNextIfcEntityId();
-      ifcOutput += `#${faceSetId}=IFCPOLYGONALFACESET(#${pointListId},$,(${faceIds.join(',')}),$);\n`;
+      const ifcFaces = boxFaces.map(face => face.map(idx => idx + 1));
+      const { ifcOutput, faceSetId } = buildIfcFaceSetString(boxVertices, ifcFaces);
 
       ifcGeometries.push({
         vertices: boxVertices,
@@ -311,8 +302,10 @@ export function generateIFCBoxSet(boreholes, referenceBorehole = boreholes[0], l
     });
   });
 
+/*
   console.log(`[IFC BOX SET] Bohrungen: ${boreholes.length}, Einzelgeometrien: ${ifcGeometries.length}`);
   console.log(`  Referenzpunkt: (${refLat.toFixed(6)}, ${refLon.toFixed(6)}, ${refNhn.toFixed(2)})`);
+*/
 
   return ifcGeometries;
 }

@@ -10,20 +10,30 @@
  * Uses Chart.js library for rendering
  */
 
-// Helper: Clear and recreate canvas in container
+// Tracks active Chart.js instances by container ID to enable proper cleanup
+const chartInstances = new Map();
+
+// Helper: Destroy existing chart, clear canvas, and render new chart
 function updateChart(containerId, config) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    
+
+    if (chartInstances.has(containerId)) {
+        chartInstances.get(containerId).destroy();
+        chartInstances.delete(containerId);
+    }
+
     const oldCanvas = container.querySelector('canvas');
     if (oldCanvas) oldCanvas.remove();
-    
+
     const oldAwaitMsg = container.querySelector('#card-title-total');
     if (oldAwaitMsg) oldAwaitMsg.remove();
-    
+
     const canvas = document.createElement('canvas');
     container.appendChild(canvas);
-    return new Chart(canvas.getContext('2d'), config);
+    const chart = new Chart(canvas.getContext('2d'), config);
+    chartInstances.set(containerId, chart);
+    return chart;
 }
 
 export function updateCharts(cardsData, volumes) {
@@ -46,6 +56,11 @@ export function updateCharts(cardsData, volumes) {
         };
     });
     
+    const totalDepths = cardsData.map((_, index) =>
+        datasets.reduce((sum, dataset) => sum + (dataset.data[index] || 0), 0)
+    );
+    const minDepth = Math.min(...totalDepths);
+
     const barConfig = {
         type: 'bar',
         data: {
@@ -63,15 +78,7 @@ export function updateCharts(cardsData, volumes) {
                 },
                 y: {
                     stacked: true,
-                    min: (() => {
-                        const totalDepths = cardsData.map((_, index) => {
-                            return datasets.reduce((sum, dataset) => {
-                                const value = dataset.data[index] || 0;
-                                return sum + value;
-                            }, 0);
-                        });
-                        return Math.min(...totalDepths);
-                    })(),
+                    min: minDepth,
                     max: 0,
                     position: 'left',
                     ticks: {
