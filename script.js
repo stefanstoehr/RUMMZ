@@ -20,11 +20,14 @@
 let cardsData = [];
 let mapInstances = {};
 let markerInstances = {};
+let mapMarkerInstances = {};
 const gridContent = document.querySelector('.grid-content');
 let projectTitle = '';
 let lastSelectedEPSG = '4326';
 let dashboardSelectedEPSG = lastSelectedEPSG;
 let ifcOverlayRequestId = 0;
+window.userLocationVisible = window.userLocationVisible === true;
+window.userLocationData = window.userLocationData || null;
 const layerNameSuggestions = [
     'Auffüllung',
     'Feinkies',
@@ -303,37 +306,79 @@ function setCoordsInputError(cardId, message) {
 }
 
 function syncCardMarker(card, options = {}) {
-    const map = mapInstances[card.id];
-    if (!map || !card.coords || map.dataset?.mapError === 'true' || typeof L === 'undefined') return;
+    syncAllCardMarkers();
 
-    let marker = markerInstances[card.id];
-    if (!marker) {
-        marker = L.marker(card.coords, { draggable: true }).addTo(map);
-        marker.on('drag', function(e) {
-            const newCoords = e.target.getLatLng();
-            card.coords = newCoords;
-            clearCoordsInputError(card.id);
-            updateCoordsInputs(card.id, newCoords);
-        });
-        marker.on('dragend', function() {
-            triggerVisualisationUpdate();
-        });
-        markerInstances[card.id] = marker;
-    } else {
-        marker.setLatLng(card.coords);
-    }
+    const map = mapInstances[card.id];
+    if (!map || !card.coords) return;
 
     if (options.centerMap === true) {
         map.setView(card.coords, map.getZoom());
     }
 }
 
+function syncAllCardMarkers() {
+    cardsData.forEach(syncMapMarkers);
+}
+
+function syncMapMarkers(mapCard) {
+    const map = mapInstances[mapCard.id];
+    if (!map || typeof L === 'undefined') return;
+
+    const mapMarkers = mapMarkerInstances[mapCard.id] || {};
+    const boreholeIdsWithCoords = new Set();
+
+    cardsData.forEach((borehole, index) => {
+        if (!borehole.coords) return;
+
+        boreholeIdsWithCoords.add(borehole.id);
+        const isCurrentCard = borehole.id === mapCard.id;
+        let marker = mapMarkers[borehole.id];
+
+        if (!marker) {
+            marker = L.marker(borehole.coords, { draggable: isCurrentCard }).addTo(map);
+            if (!isCurrentCard) {
+                marker.getElement()?.classList.add('borehole-marker--ghost');
+            }
+            marker.bindTooltip(String(index + 1), {
+                permanent: true,
+                direction: 'center',
+                offset: [-15, 1],
+                className: `borehole-marker-label${isCurrentCard ? '' : ' borehole-marker-label--ghost'}`
+            });
+
+            if (isCurrentCard) {
+                marker.on('drag', function(e) {
+                    const newCoords = e.target.getLatLng();
+                    borehole.coords = newCoords;
+                    clearCoordsInputError(borehole.id);
+                    updateCoordsInputs(borehole.id, newCoords);
+                    syncAllCardMarkers();
+                });
+                marker.on('dragend', function() {
+                    triggerVisualisationUpdate();
+                });
+                markerInstances[borehole.id] = marker;
+            }
+            mapMarkers[borehole.id] = marker;
+        } else {
+            marker.setLatLng(borehole.coords);
+            marker.setTooltipContent(String(index + 1));
+        }
+    });
+
+    Object.entries(mapMarkers).forEach(([boreholeId, marker]) => {
+        if (!boreholeIdsWithCoords.has(boreholeId)) {
+            map.removeLayer(marker);
+            delete mapMarkers[boreholeId];
+        }
+    });
+
+    mapMarkerInstances[mapCard.id] = mapMarkers;
+}
+
 function clearCardCoords(card) {
     card.coords = null;
-    const marker = markerInstances[card.id];
-    if (marker && mapInstances[card.id]) {
-        mapInstances[card.id].removeLayer(marker);
-    }
+    syncAllCardMarkers();
     delete markerInstances[card.id];
     clearCoordsInputError(card.id);
     updateCoordsInputs(card.id, null);
@@ -480,6 +525,51 @@ function hexToRgb(hex) {
 function triggerVisualisationUpdate() {
     updateUICardControls();
     window.dispatchEvent(new CustomEvent('updateVisualisation', { detail: { cardsData: cardsData } }));
+}
+
+function setDashboardUserLocation(toggleBtn, visible) {
+    const isVisible = visible === true;
+    window.userLocationVisible = isVisible;
+    if (!toggleBtn) return;
+    toggleBtn.classList.toggle('active', isVisible);
+    // Keep a stable icon class to avoid layout shifts when toggling state.
+    toggleBtn.classList.add('bi-crosshair');
+    toggleBtn.classList.remove('bi-crosshair-fill');
+    toggleBtn.setAttribute('aria-pressed', String(isVisible));
+}
+
+function requestCurrentUserLocation() {
+    return new Promise((resolve, reject) => {
+        if (!navigator.geolocation || typeof navigator.geolocation.getCurrentPosition !== 'function') {
+            reject(new Error('Geolocation API ist in diesem Browser nicht verfuegbar.'));
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                resolve({
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude,
+                    accuracy: Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null,
+                    timestamp: position.timestamp || Date.now()
+                });
+            },
+            (error) => {
+                let message = 'Standort konnte nicht bestimmt werden.';
+                if (error && typeof error.code === 'number') {
+                    if (error.code === 1) message = 'Standortfreigabe wurde verweigert.';
+                    if (error.code === 2) message = 'Standort ist aktuell nicht verfuegbar.';
+                    if (error.code === 3) message = 'Standortabfrage hat zu lange gedauert.';
+                }
+                reject(new Error(message));
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 30000
+            }
+        );
+    });
 }
 
 function escapeHtml(value) {
@@ -992,6 +1082,10 @@ function updateUICardControls() {
         if (title) {
             const card = cardsData[index];
             title.innerHTML = getCardTitleMarkup(card, index, totalCards);
+            const marker = markerInstances[card.id];
+            if (marker) {
+                marker.setTooltipContent(String(index + 1));
+            }
         }
         const titleInput = cardElem.querySelector('input[name="card-title-input"]');
         if (titleInput) {
@@ -1033,7 +1127,7 @@ function initialRender() {
                 <li style="margin-bottom: 0.75rem; display: flex; align-items: flex-start;">
                     <i class="bi bi-exclamation-triangle" style="margin-right: 0.5rem; font-size: 1.2em;"></i>
                     <div id="guide">
-                        <span>RUMMZ 1 ist ein Prototyp (MVP). Es gibt Sekundärfunktionen, die noch nicht vollständig implementiert sind.</span>
+                        <span>RUMMZ 1 ist ein Prototyp (MVP). Wenn Sie Kunde oder Partner werden möchten, schreiben Sie an dev@rummz.de.</span>
                     </div>
                 </li>
                 <li style="margin-bottom: 0.75rem; display: flex; align-items: flex-start;">
@@ -1435,12 +1529,12 @@ function initialRender() {
     mapDiv.innerHTML = `
         <div class="map-overlay-controls">
             <div class="map-icon-stack" aria-label="Map controls" title="Map controls">
-                <i class="bi bi-geo-alt" title="Bohrpunkt"></i>
-                <i class="bi bi-map" title="Karte"></i>
-                <i class="bi bi-database" title="Zylinder"></i>
-                <i class="bi bi-box" title="Volumen"></i>
-                <i class="bi bi-layers" title="Abstand"></i>
-                <i class="bi bi-globe" title="Oberfläche"></i>
+                <button type="button" class="map-icon-btn bi bi-database" title="Bohrzylinder" aria-label="Bohrzylinder"></button>
+                <button type="button" class="map-icon-btn bi bi-box" title="Ausbreitungsgeometrie" aria-label="Ausbreitungsgeometrie"></button>
+                <button type="button" class="map-icon-btn bi bi-geo-alt" title="Bohrort" aria-label="Bohrort"></button>
+                <button type="button" class="map-icon-btn bi bi-triangle" title="Höhenstruktur" aria-label="Höhenstruktur"></button>
+                <button type="button" class="map-icon-btn bi bi-map" title="Topografie" aria-label="Topografie"></button>
+                <button type="button" class="map-icon-btn bi bi-crosshair" title="Dein Standort" aria-label="Dein Standort"></button>
             </div>
             <div class="map-attribution">
                 <a href="https://threejs.org" target="_blank" rel="noopener noreferrer">three.js</a><span>&nbsp;|</span>
@@ -1453,6 +1547,34 @@ function initialRender() {
     `;
     previewDiv.appendChild(mapDiv);
 
+    const cylinderToggle = mapDiv.querySelector('.map-icon-stack .bi-database');
+    if (cylinderToggle) {
+        const isCylinderVisible = window.boreholeCylindersVisible !== false;
+        cylinderToggle.classList.toggle('active', isCylinderVisible);
+        cylinderToggle.setAttribute('aria-pressed', String(isCylinderVisible));
+        cylinderToggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const isActive = cylinderToggle.classList.toggle('active');
+            cylinderToggle.setAttribute('aria-pressed', String(isActive));
+            window.dispatchEvent(new CustomEvent('toggleBoreholeCylinders', { detail: { visible: isActive } }));
+        });
+    }
+
+    const volumeToggle = mapDiv.querySelector('.map-icon-stack .bi-box');
+    if (volumeToggle) {
+        const isVolumeVisible = window.spreadVolumesVisible !== false;
+        volumeToggle.classList.toggle('active', isVolumeVisible);
+        volumeToggle.setAttribute('aria-pressed', String(isVolumeVisible));
+        volumeToggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const isActive = volumeToggle.classList.toggle('active');
+            volumeToggle.setAttribute('aria-pressed', String(isActive));
+            window.dispatchEvent(new CustomEvent('toggleSpreadVolumes', { detail: { visible: isActive } }));
+        });
+    }
+
     const geoToggle = mapDiv.querySelector('.map-icon-stack .bi-geo-alt');
     if (geoToggle) {
         geoToggle.addEventListener('click', (event) => {
@@ -1463,6 +1585,84 @@ function initialRender() {
             geoToggle.classList.toggle('bi-geo-alt', !isActive);
             geoToggle.setAttribute('aria-pressed', String(isActive));
             window.dispatchEvent(new CustomEvent('toggleBoreholeMarkers', { detail: { visible: isActive } }));
+        });
+    }
+
+    const topographyToggle = mapDiv.querySelector('.map-icon-stack .bi-map');
+    if (topographyToggle) {
+        const isTopographyVisible = window.topographyVisible === true;
+        topographyToggle.classList.toggle('active', isTopographyVisible);
+        topographyToggle.setAttribute('aria-pressed', String(isTopographyVisible));
+        topographyToggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const isActive = topographyToggle.classList.toggle('active');
+            topographyToggle.setAttribute('aria-pressed', String(isActive));
+            window.dispatchEvent(new CustomEvent('toggleTopography', { detail: { visible: isActive } }));
+        });
+    }
+
+    const surfaceToggle = mapDiv.querySelector('.map-icon-stack .bi-triangle');
+    if (surfaceToggle) {
+        const isDgmActive = window.rummzVisualisationMode === 'dgm';
+        surfaceToggle.classList.toggle('active', isDgmActive);
+        surfaceToggle.classList.toggle('bi-triangle-fill', isDgmActive);
+        surfaceToggle.classList.toggle('bi-triangle', !isDgmActive);
+        surfaceToggle.setAttribute('aria-pressed', String(isDgmActive));
+
+        surfaceToggle.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const previousMode = window.rummzVisualisationMode || 'plane';
+            const nextMode = previousMode === 'plane' ? 'dgm' : 'plane';
+            window.dispatchEvent(new CustomEvent('switchVisualisationMode', { detail: { previousMode } }));
+            window.rummzVisualisationMode = nextMode;
+
+            if (nextMode === 'dgm') {
+                await import('./three-dgm.js');
+            }
+
+            const isActive = nextMode === 'dgm';
+            surfaceToggle.classList.toggle('active', isActive);
+            surfaceToggle.classList.toggle('bi-triangle-fill', isActive);
+            surfaceToggle.classList.toggle('bi-triangle', !isActive);
+            surfaceToggle.setAttribute('aria-pressed', String(isActive));
+            triggerVisualisationUpdate();
+        });
+    }
+
+    const userLocationToggle = mapDiv.querySelector('.map-icon-stack .bi-crosshair, .map-icon-stack .bi-crosshair-fill');
+    if (userLocationToggle) {
+        setDashboardUserLocation(userLocationToggle, window.userLocationVisible === true);
+
+        userLocationToggle.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const wasActive = userLocationToggle.classList.contains('active');
+            if (wasActive) {
+                setDashboardUserLocation(userLocationToggle, false);
+                window.dispatchEvent(new CustomEvent('toggleUserLocation', { detail: { visible: false } }));
+                return;
+            }
+
+            userLocationToggle.disabled = true;
+            userLocationToggle.classList.add('is-loading');
+            try {
+                const locationData = await requestCurrentUserLocation();
+                window.userLocationData = locationData;
+                setDashboardUserLocation(userLocationToggle, true);
+                window.dispatchEvent(new CustomEvent('updateUserLocation', { detail: locationData }));
+                window.dispatchEvent(new CustomEvent('toggleUserLocation', { detail: { visible: true } }));
+            } catch (error) {
+                setDashboardUserLocation(userLocationToggle, false);
+                window.dispatchEvent(new CustomEvent('toggleUserLocation', { detail: { visible: false } }));
+                alert(error instanceof Error ? error.message : 'Standort konnte nicht bestimmt werden.');
+            } finally {
+                userLocationToggle.disabled = false;
+                userLocationToggle.classList.remove('is-loading');
+            }
         });
     }
 
@@ -1694,6 +1894,7 @@ function handleAddCardClick(target) {
     // After inserting into DOM, ensure coords/labels reflect EPSG
     updateCoordsInputs(newCardData.id, newCardData.coords);
     initLeafletMap(newCardData);
+    syncAllCardMarkers();
     updateUICardControls();
     triggerVisualisationUpdate();
 
@@ -1727,12 +1928,14 @@ function handleDeleteCardClick(target) {
                 mapInstances[cardId].remove();
                 delete mapInstances[cardId];
             }
+            delete mapMarkerInstances[cardId];
             delete markerInstances[cardId];
             cardsData.splice(cardIndex, 1);
             if (cardElem) cardElem.remove();
             if (precedingAddBtn && precedingAddBtn.matches('.add-card-btn')) {
                 precedingAddBtn.remove();
             }
+            syncAllCardMarkers();
             updateUICardControls();
             triggerVisualisationUpdate();
         }
@@ -2154,6 +2357,8 @@ function initLeafletMap(card) {
     tileLayer.on('tileerror', () => {
         failLeafletMap(card.id, mapElement, 'Karte konnte nicht geladen werden. Zeige statischen Fallback.');
     });
+
+    syncMapMarkers(card);
 
     if (card.coords) {
         syncCardMarker(card, { centerMap: false });
