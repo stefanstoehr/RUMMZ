@@ -76,6 +76,10 @@
   object-position: center;
 }
 
+.landing-image--pending {
+  visibility: hidden;
+}
+
 .loading-spinner {
   position: relative;
   z-index: 1;
@@ -1086,6 +1090,85 @@ input[type="text"]:focus, input[type="number"]:focus, select:focus {
 
 .dashboard-button i {
   font-size: 1.1em; /* Macht das Icon etwas größer als der Text */
+}
+
+.fader-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+
+.dashboard-settings-toggle {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height);
+  margin: 0.33rem 1rem 0.33rem 1.25rem;
+  padding: 0;
+  box-sizing: border-box;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.dashboard-settings-toggle-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.dashboard-settings-toggle .layer-separator-metric {
+  font-size: 0.7rem;
+}
+
+.dashboard-settings-triangle {
+  display: inline-block;
+  font-size: 1rem;
+  color: #495057;
+  transition: transform 0.15s ease;
+  line-height: 1;
+}
+
+.fader-section.is-open .dashboard-settings-triangle {
+  transform: rotate(90deg);
+}
+
+.fader-section-content {
+  width: 100%;
+  padding: 1rem;
+  box-sizing: border-box;
+}
+
+.fader-section-content[hidden] {
+  display: none !important;
+}
+
+.fader-section .location-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.fader-control-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.fader-section input[type="range"] {
+  flex: 1 1 auto;
+}
+
+.fader-value {
+  flex: 0 0 4.25rem;
+  text-align: right;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #495057;
 }
 
 .grid-data {

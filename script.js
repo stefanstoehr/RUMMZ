@@ -26,6 +26,54 @@ let projectTitle = '';
 let lastSelectedEPSG = '4326';
 let dashboardSelectedEPSG = lastSelectedEPSG;
 let ifcOverlayRequestId = 0;
+const defaultVisualControls = {
+    boreholeDiameter: 0,
+    transparency: 0,
+    boundingbox: 0,
+    layerThickness: 0,
+    layerSpacing: 0
+};
+
+const multiplierSequence = [1, 5, 10, 15, 20, 25];
+
+const visualControlConfig = {
+    boreholeDiameter: {
+        min: 0,
+        max: multiplierSequence.length - 1,
+        step: 1,
+        format: (value) => `x${multiplierSequence[value] ?? 1}`
+    },
+    transparency: {
+        min: 0,
+        max: 100,
+        step: 1,
+        format: (value) => `${value}%`
+    },
+    boundingbox: {
+        min: 0,
+        max: 100,
+        step: 1,
+        format: (value) => {
+            if (value <= 5) return 'max.';
+            if (value >= 95) return 'min.';
+            return `${value}%`;
+        }
+    },
+    layerThickness: {
+        min: 0,
+        max: multiplierSequence.length - 1,
+        step: 1,
+        format: (value) => `x${multiplierSequence[value] ?? 1}`
+    },
+    layerSpacing: {
+        min: 0,
+        max: 25,
+        step: 5,
+        format: (value) => `${value} m`
+    }
+};
+
+window.rummzVisualControls = Object.assign({}, defaultVisualControls, window.rummzVisualControls || {});
 window.userLocationVisible = window.userLocationVisible === true;
 window.userLocationData = window.userLocationData || null;
 const layerNameSuggestions = [
@@ -89,14 +137,38 @@ try {
 function hideLoadingOverlay() {
     const overlay = document.getElementById('loading-overlay');
     if (overlay) {
-        // Simulate connection check (2 seconds)
-        setTimeout(() => {
+        const landingImage = overlay.querySelector('.landing-image');
+        const hideAfterLandingImageReady = () => {
+            if (landingImage) {
+                landingImage.classList.remove('landing-image--pending');
+            }
+
+            // Keep the landing image visible for 3.5 seconds after it is ready.
+            setTimeout(() => {
             overlay.classList.add('fade-out');
             // Remove from DOM after animation completes
             setTimeout(() => {
                 overlay.remove();
             }, 500);
-        }, 2000);
+            }, 3500);
+        };
+
+        if (!landingImage || (landingImage.complete && landingImage.naturalWidth > 0)) {
+            hideAfterLandingImageReady();
+            return;
+        }
+
+        landingImage.addEventListener('load', async () => {
+            if (typeof landingImage.decode === 'function') {
+                try {
+                    await landingImage.decode();
+                } catch (error) {
+                    // The load event still confirms that the image is usable.
+                }
+            }
+            hideAfterLandingImageReady();
+        }, { once: true });
+        landingImage.addEventListener('error', hideAfterLandingImageReady, { once: true });
     }
 }
 
@@ -560,7 +632,81 @@ function hexToRgb(hex) {
  */
 function triggerVisualisationUpdate() {
     updateUICardControls();
-    window.dispatchEvent(new CustomEvent('updateVisualisation', { detail: { cardsData: cardsData } }));
+    window.dispatchEvent(new CustomEvent('updateVisualisation', {
+        detail: {
+            cardsData: cardsData,
+            visualControls: window.rummzVisualControls
+        }
+    }));
+}
+
+function clampSliderValue(value, min, max, step) {
+    const parsed = Number.parseInt(value, 10);
+    if (!Number.isFinite(parsed)) return min;
+    const clamped = Math.max(min, Math.min(max, parsed));
+    if (!step || step <= 0) return clamped;
+    const snapped = Math.round((clamped - min) / step) * step + min;
+    return Math.max(min, Math.min(max, snapped));
+}
+
+function setVisualControlValue(controlName, value) {
+    if (!window.rummzVisualControls || typeof window.rummzVisualControls !== 'object') {
+        window.rummzVisualControls = Object.assign({}, defaultVisualControls);
+    }
+
+    const config = visualControlConfig[controlName];
+    if (!config) return;
+
+    window.rummzVisualControls[controlName] = clampSliderValue(value, config.min, config.max, config.step);
+}
+
+function updateDashboardFaderValueLabel(faderSection, sliderId, controlName, value) {
+    const valueLabel = faderSection.querySelector(`[data-fader-value-for="${sliderId}"]`);
+    if (!valueLabel) return;
+
+    const config = visualControlConfig[controlName];
+    if (!config) return;
+
+    valueLabel.textContent = config.format(value);
+}
+
+function bindDashboardFaderControls(faderSection) {
+    if (!faderSection) return;
+
+    const controlBindings = [
+        { id: 'fader-borehole-diameter', control: 'boreholeDiameter' },
+        { id: 'fader-transparency', control: 'transparency' },
+        { id: 'fader-boundingbox', control: 'boundingbox' },
+        { id: 'fader-layer-thickness', control: 'layerThickness' },
+        { id: 'fader-layer-spacing', control: 'layerSpacing' }
+    ];
+
+    controlBindings.forEach(({ id, control }) => {
+        const slider = faderSection.querySelector(`#${id}`);
+        if (!slider) return;
+
+        const config = visualControlConfig[control];
+        if (!config) return;
+
+        slider.min = String(config.min);
+        slider.max = String(config.max);
+        slider.step = String(config.step);
+
+        const currentValue = window.rummzVisualControls?.[control];
+        const safeValue = clampSliderValue(currentValue, config.min, config.max, config.step);
+        slider.value = String(safeValue);
+        setVisualControlValue(control, safeValue);
+        updateDashboardFaderValueLabel(faderSection, id, control, safeValue);
+
+        const applyValue = () => {
+            setVisualControlValue(control, slider.value);
+            updateDashboardFaderValueLabel(faderSection, id, control, window.rummzVisualControls[control]);
+            triggerVisualisationUpdate();
+        };
+
+        slider.addEventListener('input', applyValue);
+        slider.addEventListener('change', applyValue);
+    });
 }
 
 function setDashboardUserLocation(toggleBtn, visible) {
@@ -1571,6 +1717,7 @@ function initialRender() {
                 <button type="button" class="map-icon-btn bi bi-triangle" title="Höhenstruktur" aria-label="Höhenstruktur"></button>
                 <button type="button" class="map-icon-btn bi bi-map" title="Topografie" aria-label="Topografie"></button>
                 <button type="button" class="map-icon-btn bi bi-crosshair" title="Dein Standort" aria-label="Dein Standort"></button>
+                <button type="button" class="map-icon-btn bi bi-arrows-angle-contract" title="Ansicht zurücksetzen" aria-label="Ansicht zurücksetzen"></button>
             </div>
             <div class="map-attribution">
                 <a href="https://threejs.org" target="_blank" rel="noopener noreferrer">three.js</a><span>&nbsp;|</span>
@@ -1702,6 +1849,16 @@ function initialRender() {
         });
     }
 
+    const resetViewToggle = mapDiv.querySelector('.map-icon-stack .bi-arrows-angle-contract');
+    if (resetViewToggle) {
+        resetViewToggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            window.dispatchEvent(new CustomEvent('resetVisualisationView'));
+            triggerVisualisationUpdate();
+        });
+    }
+
     // DOWNLOAD-BUTTONS-SECTION
 
     const locationDiv = document.createElement('div');
@@ -1724,6 +1881,70 @@ ${getEpsgSelectOptions(dashboardSelectedEPSG)}
     `;
 
     previewDiv.appendChild(locationDiv);
+
+    // FADER-SECTION
+
+    const faderDiv = document.createElement('div');
+    faderDiv.className = 'card-location fader-section';
+    faderDiv.innerHTML = `
+        <button type="button" class="dashboard-settings-toggle" aria-expanded="false" aria-controls="dashboard-settings-content" aria-label="Einstellungen aufklappen">
+            <span class="dashboard-settings-toggle-content">
+                <span class="dashboard-settings-triangle" aria-hidden="true">▸</span>
+                <span class="layer-separator-metric">Einstellungen</span>
+            </span>
+        </button>
+        <div id="dashboard-settings-content" class="fader-section-content" hidden>
+            <div class="location-input-group">
+                <label for="fader-borehole-diameter">Bohrungsdurchmesser</label>
+                <div class="fader-control-row">
+                    <input type="range" id="fader-borehole-diameter" name="fader-borehole-diameter">
+                    <span class="fader-value" data-fader-value-for="fader-borehole-diameter">x1</span>
+                </div>
+            </div>
+            <div class="location-input-group">
+                <label for="fader-transparency">Transparenz</label>
+                <div class="fader-control-row">
+                    <input type="range" id="fader-transparency" name="fader-transparency">
+                    <span class="fader-value" data-fader-value-for="fader-transparency">0%</span>
+                </div>
+            </div>
+            <div class="location-input-group">
+                <label for="fader-boundingbox">Boundingbox</label>
+                <div class="fader-control-row">
+                    <input type="range" id="fader-boundingbox" name="fader-boundingbox">
+                    <span class="fader-value" data-fader-value-for="fader-boundingbox">max.</span>
+                </div>
+            </div>
+            <div class="location-input-group">
+                <label for="fader-layer-thickness">Schichtmächtigkeit</label>
+                <div class="fader-control-row">
+                    <input type="range" id="fader-layer-thickness" name="fader-layer-thickness">
+                    <span class="fader-value" data-fader-value-for="fader-layer-thickness">x1</span>
+                </div>
+            </div>
+            <div class="location-input-group">
+                <label for="fader-layer-spacing">Schichtabstand</label>
+                <div class="fader-control-row">
+                    <input type="range" id="fader-layer-spacing" name="fader-layer-spacing">
+                    <span class="fader-value" data-fader-value-for="fader-layer-spacing">0 m</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    previewDiv.appendChild(faderDiv);
+    const settingsToggle = faderDiv.querySelector('.dashboard-settings-toggle');
+    const settingsContent = faderDiv.querySelector('.fader-section-content');
+    if (settingsToggle && settingsContent) {
+        settingsToggle.addEventListener('click', () => {
+            const shouldOpen = settingsContent.hidden;
+            settingsContent.hidden = !shouldOpen;
+            settingsToggle.setAttribute('aria-expanded', String(shouldOpen));
+            settingsToggle.setAttribute('aria-label', shouldOpen ? 'Einstellungen zuklappen' : 'Einstellungen aufklappen');
+            faderDiv.classList.toggle('is-open', shouldOpen);
+        });
+    }
+    bindDashboardFaderControls(faderDiv);
     
     // GRID-INFO-SECTIONS
 

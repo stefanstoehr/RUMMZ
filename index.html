@@ -60,6 +60,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
   <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="preload" as="image" href="assets/cartoon-start.png">
   <link rel="preload" as="image" href="assets/cartoon-warten.png">
   <link rel="preload" as="image" href="assets/cartoon-ende.png">
 </head>
@@ -71,7 +72,7 @@
   <!-- Loading Overlay -->
   <div id="loading-overlay" class="loading-overlay">
     <div class="loading-content">
-      <img src="assets/cartoon-start.png" alt="RUMMZ Render" class="landing-image">
+      <img src="assets/cartoon-start.png" alt="RUMMZ Render" class="landing-image landing-image--pending">
       <div class="loading-spinner">
         <div class="spinner"></div>
       </div>
