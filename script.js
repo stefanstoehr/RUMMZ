@@ -124,7 +124,7 @@ function showIfcDownloadOverlay() {
         overlay.className = 'loading-overlay';
         overlay.innerHTML = `
             <div class="loading-content">
-                <img src="assets/cartoon-freude.png" alt="IFC Download gestartet" class="landing-image">
+                <img src="assets/cartoon-ende.png" alt="IFC Download gestartet" class="landing-image">
             </div>
         `;
 
@@ -142,7 +142,43 @@ function showIfcDownloadOverlay() {
         clearTimeout(timeoutId);
     };
 
-    preloadImage.src = 'assets/cartoon-freude.png';
+    preloadImage.src = 'assets/cartoon-ende.png';
+}
+
+/**
+ * Shows a full-screen waiting overlay while a long-running synchronous
+ * task (e.g. rebuilding all cards/maps after a JSON import) is in progress.
+ * The image is preloaded on page load (see index.html), so it is already
+ * cached by the browser and renders instantly here.
+ */
+function showWaitOverlay() {
+    const existingOverlay = document.getElementById('wait-overlay');
+    if (existingOverlay) {
+        existingOverlay.remove();
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'wait-overlay';
+    overlay.className = 'loading-overlay';
+    overlay.innerHTML = `
+        <div class="loading-content">
+            <img src="assets/cartoon-warten.png" alt="Bitte warten" class="landing-image">
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+}
+
+/**
+ * Hides the waiting overlay shown by showWaitOverlay().
+ */
+function hideWaitOverlay() {
+    const overlay = document.getElementById('wait-overlay');
+    if (!overlay) return;
+    overlay.classList.add('fade-out');
+    setTimeout(() => overlay.remove(), 500);
 }
 
 // Trigger when page loads
@@ -2325,6 +2361,17 @@ function failLeafletMap(cardId, mapElement) {
 }
 
 /**
+ * Centers each card's map on its own borehole marker at a fixed close-up
+ * zoom level, which looks right regardless of how spread out the site is.
+ * @param {object} map - Leaflet map instance
+ * @param {object} card - Card data object with coords property
+ */
+function fitMapToBoreholes(map, card) {
+    if (!card.coords) return;
+    map.setView([card.coords.lat, card.coords.lng], 17);
+}
+
+/**
  * Initializes Leaflet map for a card if not already initialized
  * Sets up OpenStreetMap tiles, marker placement, and drag interaction
  * @param {object} card - Card data object with id and coords properties
@@ -2362,9 +2409,16 @@ function initLeafletMap(card) {
 
     if (card.coords) {
         syncCardMarker(card, { centerMap: false });
-        map.setView(card.coords, 13);
         updateCoordsInputs(card.id, card.coords);
     }
+    fitMapToBoreholes(map, card);
+
+    // Container may not have its final layout size yet when many maps are created
+    // at once (e.g. after a JSON import) — recalc size and re-fit once it does.
+    requestAnimationFrame(() => {
+        map.invalidateSize();
+        fitMapToBoreholes(map, card);
+    });
 
     map.on('click', function(e) {
         card.coords = e.latlng;

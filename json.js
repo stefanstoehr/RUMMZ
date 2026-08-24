@@ -105,6 +105,9 @@ function resetImportedProjectState() {
     if (typeof markerInstances !== 'undefined') {
         markerInstances = {};
     }
+    if (typeof mapMarkerInstances !== 'undefined') {
+        mapMarkerInstances = {};
+    }
 }
 
 function importProjectFromJSON(file) {
@@ -112,19 +115,25 @@ function importProjectFromJSON(file) {
 
     const reader = new FileReader();
     reader.onload = function(event) {
-        try {
-            const importedData = JSON.parse(event.target.result);
-            const normalizedProject = normalizeImportedProject(importedData);
+        showWaitOverlay();
+        // Defer the heavy rebuild so the browser can paint the overlay first.
+        setTimeout(() => {
+            try {
+                const importedData = JSON.parse(event.target.result);
+                const normalizedProject = normalizeImportedProject(importedData);
 
-            projectTitle = normalizedProject.title;
-            cardsData = normalizedProject.boreholes;
+                projectTitle = normalizedProject.title;
+                cardsData = normalizedProject.boreholes;
 
-            resetImportedProjectState();
-            initialRender();
-            triggerVisualisationUpdate();
-        } catch (error) {
-            alert('Error parsing JSON file: ' + error.message);
-        }
+                resetImportedProjectState();
+                initialRender();
+                triggerVisualisationUpdate();
+            } catch (error) {
+                alert('Error parsing JSON file: ' + error.message);
+            } finally {
+                hideWaitOverlay();
+            }
+        }, 20);
     };
     reader.readAsText(file);
 }
