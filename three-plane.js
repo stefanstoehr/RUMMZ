@@ -370,11 +370,24 @@ async function buildTopographyOverlay(scene, gridSize, centerX, centerZ, midNHN,
   }
 }
 
+// Builds a signature of all geometry-defining model data (borehole positions,
+// NHN values and layer stack). Used to distinguish model changes from pure
+// slider changes, so the camera is only re-framed when the model itself changed.
+function buildModelSignature(data) {
+  return JSON.stringify(data.map(bh => ({
+    id: bh.id,
+    lat: bh.coords.lat,
+    lng: bh.coords.lng,
+    nhn: bh.nhn,
+    layers: bh.layers.map(layer => [layer.name, layer.height])
+  })));
+}
+
 function updateVisualisation (cardsData) {
-  const shouldResetView = window.rummzVisualisationResetViewRequested === true;
+  const resetViewRequested = window.rummzVisualisationResetViewRequested === true;
   window.rummzVisualisationResetViewRequested = false;
 
-  const previousViewState = (!shouldResetView && visualisationRuntime.camera && visualisationRuntime.controls)
+  const previousViewState = (visualisationRuntime.camera && visualisationRuntime.controls)
     ? {
       position: visualisationRuntime.camera.position.clone(),
       target: visualisationRuntime.controls.target.clone()
@@ -391,6 +404,7 @@ function updateVisualisation (cardsData) {
   const layerSpacingM = visualControls.layerSpacingM;
 
   if (!Array.isArray(cardsData) || cardsData.length === 0) {
+    window.rummzVisualisationModelSignature = '[]';
     publishRummzIfcSnapshot([], [], { x: 0, y: 0, z: 0 });
     updateCharts([], {});
     return;
@@ -447,17 +461,28 @@ function updateVisualisation (cardsData) {
     .filter(validateBorehole);
 
   if (renderCardsData.length === 0) {
+    window.rummzVisualisationModelSignature = '[]';
     publishRummzIfcSnapshot([], [], { x: 0, y: 0, z: 0 });
     updateCharts([], {});
     return;
   }
+
+  // Re-frame the camera when the model itself changed (new/edited boreholes);
+  // pure slider changes keep the previous camera view ("an Ort und Stelle").
+  const modelSignature = buildModelSignature(renderCardsData);
+  const modelChanged = window.rummzVisualisationModelSignature !== undefined
+    && window.rummzVisualisationModelSignature !== modelSignature;
+  window.rummzVisualisationModelSignature = modelSignature;
+  const shouldResetView = resetViewRequested || modelChanged;
 
   const container = document.getElementById('dashboard-map');
   if (!container) return;
 
   // INITIALIZE THREE.JS
   const scene = new THREE.Scene();
-  scene.background = null;
+  // Solid dark-gray viewport background: covers the render.png placeholder on the
+  // container whenever actual geometry is being displayed.
+  scene.background = new THREE.Color(0x343a40);
   window.scene = scene; // GLOBAL FOR EXPORT
 
   const existingCanvas = container.querySelector('canvas');
@@ -471,6 +496,8 @@ function updateVisualisation (cardsData) {
   renderer.setPixelRatio(window.devicePixelRatio);
   renderer.setSize(container.clientWidth, container.clientHeight);
   renderer.setClearColor(0x000000, 0);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.domElement.style.position = 'absolute';
   renderer.domElement.style.top = '0';
   renderer.domElement.style.left = '0';
@@ -492,10 +519,17 @@ function updateVisualisation (cardsData) {
   visualisationRuntime.controls = controls;
   visualisationRuntime.container = container;
 
-  // Lights
-  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  // Lights (atmosphärisch): weiche Hemisphäre (hell oben, deutlich dunkler unten)
+  // plus schräges, Schatten werfendes Direktionallicht für sichtbare Flächenschattierung.
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x2b3238, 0.9);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xfff2dd, 1.6);
+  dir.castShadow = true;
+  dir.shadow.mapSize.set(2048, 2048);
+  dir.shadow.bias = -0.0005;
+  dir.shadow.normalBias = 0.02;
   scene.add(dir);
-  scene.add(new THREE.AmbientLight(0xffffff,0.4));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.12));
     
   // GEO-CENTER DER BOHRUNGEN ALS LAT/LON
   const refLat = renderCardsData.reduce((s,b)=>s+b.coords.lat,0)/renderCardsData.length;
@@ -764,12 +798,23 @@ function updateVisualisation (cardsData) {
   camera.updateProjectionMatrix();
 
   camera.position.set(centerX + distance, midNHN + distance, centerZ + distance);
-  dir.position.set(centerX + distance, midNHN + distance, centerZ + distance);// Lichtposition an Kamera binden
+  dir.position.set(centerX + distance * 0.35, midNHN + distance * 0.9, centerZ - distance * 0.7); // steil-schräger Lichteinfall
+  dir.target.position.set(centerX, midNHN, centerZ);
+  scene.add(dir.target);
+  // Shadow-Kamera exakt auf das Modell zuschneiden
+  const shadowExtent = Math.max(gridSize, highestNHN - lowestLayerEndpoint);
+  dir.shadow.camera.left = -shadowExtent;
+  dir.shadow.camera.right = shadowExtent;
+  dir.shadow.camera.top = shadowExtent;
+  dir.shadow.camera.bottom = -shadowExtent;
+  dir.shadow.camera.near = 0.1;
+  dir.shadow.camera.far = distance * 4;
+  dir.shadow.camera.updateProjectionMatrix();
   camera.lookAt(centerX, midNHN, centerZ);
 
   controls.target.set(centerX, midNHN, centerZ);
 
-  if (previousViewState) {
+  if (previousViewState && !shouldResetView) {
     camera.position.copy(previousViewState.position);
     controls.target.copy(previousViewState.target);
     const viewDistance = camera.position.distanceTo(controls.target);
@@ -797,12 +842,14 @@ function updateVisualisation (cardsData) {
       const geom = new THREE.CylinderGeometry(radius, radius, h, 32);
       const mat = new THREE.MeshStandardMaterial({
         color: layer.color,
-        roughness: 0.8,
-        metalness: 0.1,
+        roughness: 0.55,
+        metalness: 0.05,
         transparent: true,
         opacity: spreadOpacity
       });
       const mesh = new THREE.Mesh(geom, mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       mesh.position.set(x, -(currentDepth + h/2), z);
       mesh.userData = {
         layerIndex: idx,
@@ -945,11 +992,15 @@ function updateVisualisation (cardsData) {
           color: layer.color,
           transparent: true,
           opacity: spreadOpacity,
+          roughness: 0.55,
+          metalness: 0.05,
           polygonOffset: true,
           polygonOffsetFactor: 1,
           polygonOffsetUnits: 1
         });
         const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
 
         // set metadata for raycast info (layerName, thickness, per-cell volume, borehole index, layer index)
         mesh.userData = {

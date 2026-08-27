@@ -150,7 +150,7 @@ function hideLoadingOverlay() {
             setTimeout(() => {
                 overlay.remove();
             }, 500);
-            }, 3500);
+            }, 3000);
         };
 
         if (!landingImage || (landingImage.complete && landingImage.naturalWidth > 0)) {
@@ -202,12 +202,15 @@ function showIfcDownloadOverlay() {
 
         document.body.appendChild(overlay);
 
+        // Keep the download image fully visible for at least 3 seconds before fading out.
+        const MIN_VISIBLE_MS = 3000;
+        const FADE_OUT_MS = 500;
         setTimeout(() => {
             overlay.classList.add('fade-out');
             setTimeout(() => {
                 overlay.remove();
-            }, 500);
-        }, 2000);
+            }, FADE_OUT_MS);
+        }, MIN_VISIBLE_MS);
     };
 
     preloadImage.onerror = () => {
@@ -240,17 +243,30 @@ function showWaitOverlay() {
             </div>
         </div>
     `;
+    // Record the show time so hideWaitOverlay() can enforce a minimum visibility of 3 s.
+    overlay.dataset.shownAt = String(Date.now());
     document.body.appendChild(overlay);
 }
 
 /**
  * Hides the waiting overlay shown by showWaitOverlay().
+ * The overlay stays fully visible for at least 3 seconds before fading out.
  */
 function hideWaitOverlay() {
     const overlay = document.getElementById('wait-overlay');
-    if (!overlay) return;
-    overlay.classList.add('fade-out');
-    setTimeout(() => overlay.remove(), 500);
+    if (!overlay || overlay.dataset.fadeStarted === 'true') return;
+
+    const MIN_VISIBLE_MS = 3000;
+    const FADE_OUT_MS = 500;
+    const shownAt = Number.parseInt(overlay.dataset.shownAt || '0', 10);
+    const elapsed = Number.isFinite(shownAt) && shownAt > 0 ? Date.now() - shownAt : MIN_VISIBLE_MS;
+    const remainingMs = Math.max(0, MIN_VISIBLE_MS - elapsed);
+
+    overlay.dataset.fadeStarted = 'true';
+    setTimeout(() => {
+        overlay.classList.add('fade-out');
+        setTimeout(() => overlay.remove(), FADE_OUT_MS);
+    }, remainingMs);
 }
 
 // Trigger when page loads
@@ -1764,8 +1780,6 @@ function initialRender() {
             event.preventDefault();
             event.stopPropagation();
             const isActive = geoToggle.classList.toggle('active');
-            geoToggle.classList.toggle('bi-geo-alt-fill', isActive);
-            geoToggle.classList.toggle('bi-geo-alt', !isActive);
             geoToggle.setAttribute('aria-pressed', String(isActive));
             window.dispatchEvent(new CustomEvent('toggleBoreholeMarkers', { detail: { visible: isActive } }));
         });
@@ -1789,8 +1803,6 @@ function initialRender() {
     if (surfaceToggle) {
         const isDgmActive = window.rummzVisualisationMode === 'dgm';
         surfaceToggle.classList.toggle('active', isDgmActive);
-        surfaceToggle.classList.toggle('bi-triangle-fill', isDgmActive);
-        surfaceToggle.classList.toggle('bi-triangle', !isDgmActive);
         surfaceToggle.setAttribute('aria-pressed', String(isDgmActive));
 
         surfaceToggle.addEventListener('click', async (event) => {
@@ -1808,8 +1820,6 @@ function initialRender() {
 
             const isActive = nextMode === 'dgm';
             surfaceToggle.classList.toggle('active', isActive);
-            surfaceToggle.classList.toggle('bi-triangle-fill', isActive);
-            surfaceToggle.classList.toggle('bi-triangle', !isActive);
             surfaceToggle.setAttribute('aria-pressed', String(isActive));
             triggerVisualisationUpdate();
         });
