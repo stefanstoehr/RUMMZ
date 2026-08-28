@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://unpkg.com" crossorigin>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
+  <title>RUMMZ | BIM-Bodenschichten</title>
+  <meta name="description" content="RUMMZ ist eine browserbasierte Web-App zur schnellen Modellierung von Baugrunddaten und zum IFC4-Export für BIM-konforme Infrastrukturprojekte.">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="author" content="Stefan Stoehr">
+  <meta name="theme-color" content="#f8f9fa">
+  <link rel="canonical" href="https://rummz.de/">
+
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="de_DE">
+  <meta property="og:site_name" content="RUMMZ">
+  <meta property="og:title" content="RUMMZ | BIM-Bodenschichten">
+  <meta property="og:description" content="Digitale Bodenschichtendaten erfassen, in 3D auswerten und als IFC4 exportieren - schnell, browserbasiert und DSGVO-konform.">
+  <meta property="og:url" content="https://rummz.de/">
+  <meta property="og:image" content="https://rummz.de/assets/cartoon-start.png">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="RUMMZ | BIM-Bodenschichten">
+  <meta name="twitter:description" content="Bodenschichtendaten browserbasiert in 3D modellieren und als IFC4 exportieren.">
+  <meta name="twitter:image" content="https://rummz.de/assets/cartoon-start.png">
+
+  <meta name="apple-mobile-web-app-title" content="RUMMZ" />
+  <link rel="icon" type="image/png" href="favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="favicon/favicon.svg" />
+  <link rel="icon" href="favicon/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="favicon/apple-touch-icon.png" />
+  <link rel="manifest" href="favicon/site.webmanifest" />
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "RUMMZ",
+      "url": "https://rummz.de/",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web Browser",
+      "description": "BIM-Bodenschichten: Web-App zur Modellierung des Bodenschichtenmodells mit 3D-Vorschau und IFC4-Export für BIM-Prozesse.",
+      "inLanguage": "de",
+      "creator": {
+        "@type": "Person",
+        "name": "Stefan Stoehr"
+      }
+    }
+  </script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+        "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/",
+        "d3-delaunay": "https://cdn.jsdelivr.net/npm/d3-delaunay@6.0.2/+esm"
+      }
+    }
+  </script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preload" as="image" href="assets/cartoon-start.png">
+  <link rel="preload" as="image" href="assets/cartoon-warten.png">
+  <link rel="preload" as="image" href="assets/cartoon-ende.png">
+</head>
+<body>
+  <noscript>
+    <p class="seo-only">RUMMZ benötigt JavaScript für die interaktive 3D-Modellierung und den IFC-Export.</p>
+  </noscript>
+
+  <!-- Loading Overlay -->
+  <div id="loading-overlay" class="loading-overlay">
+    <div class="loading-content">
+      <img src="assets/cartoon-start.png" alt="RUMMZ Render" class="landing-image landing-image--pending">
+      <div class="loading-spinner">
+        <div class="spinner"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="layout">
+    <header>
+      <div class="header-actions">
+        <a href="#" aria-label="Show Guide" id="show-guide"><i class="bi bi-shield-exclamation"></i><span>INFO</span></a>
+        <a href="https://cdn.jsdelivr.net/gh/stefanstoehr/rummz@main/RUMMZ_SHOW_MTJ_08-07-2026.pdf" target="_blank" rel="noopener noreferrer" aria-label="PDF for Promo" id="promo-link"><i class="bi bi-file-text"></i><span>DOCS</span></a>
+        <a href="https://youtu.be/PG060WE8BRk?si=2e3HeHPvy8UYjEuQ" target="_blank" rel="noopener noreferrer" aria-label="Video on Youtube" id="youtube-link"><i class="bi bi-play-circle"></i><span>CLIP</span></a>
+        <a href="https://github.com/stefanstoehr/RUMMZ" target="_blank" rel="noopener noreferrer" aria-label="Repository on GitHub" id="github-link"><i class="bi bi-github"></i><span>CODE</span></a>
+        <a href="https://mastodon.social/@einsnull2" target="_blank" rel="noopener noreferrer" aria-label="Mastodon" id="mastodon-link"><i class="bi bi-mastodon"></i><span>NEWS</span></a>
+        <a href="https://www.paypal.com/donate/?hosted_button_id=CA484Y7RZPVEC" target="_blank" rel="noopener noreferrer" aria-label="Plan with Features" id="plan-link"><i class="bi bi-paypal"></i><span>HELP</span></a>
+      </div>
+      <div class="header-actions">
+        <a href="#" aria-label="JSON Download" id="json-download"><span>SAVE</span><i class="bi bi-file-earmark-arrow-down"></i></a>
+        <a href="#" aria-label="JSON Upload" id="json-upload"><span>LOAD</span><i class="bi bi-file-earmark-arrow-up"></i></a>
+      </div>
+    </header>
+    <main>
+      <h1 class="seo-only">RUMMZ - Rapide Untergrund Material Modellierung und Zonierung</h1>
+      <div class="grid-content">
+      </div>
+    </main>
+    <footer>
+      <div class="footer-container">
+        <div class="footer-text">
+          <img src="favicon/favicon.svg" alt="" aria-hidden="true" class="footer-icon">
+          <span>&copy;&nbsp;<span id="year">2026</span>&nbsp;RUMMZ supported by&nbsp;<a href="https://drstefanweisse.de/" target="_blank" rel="noopener noreferrer">DSWS</a></span>
+        </div>
+      </div>
+    </footer>
+  </div>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.8.0/proj4.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3"></script>
+  <script src="script.js"></script>
+  <script type="module" src="three-plane.js"></script>
+  <script src="json.js"></script>
+</body>
+</html>
