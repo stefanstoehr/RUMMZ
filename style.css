@@ -1041,6 +1041,10 @@ label {
     padding: 0.35rem;
   }
 
+  .layer-info-panel[data-layer-info-panel-content="water"] .layer-info-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .layer-info-grid,
   .layer-info-grid-lab {
     grid-template-columns: 1fr;
@@ -1048,6 +1052,10 @@ label {
 
   .layer-info-field-group {
     grid-column: span 1;
+  }
+
+  .layer-info-additional-values-content > .layer-info-field-group {
+    grid-column: span 3;
   }
 
   .layer-info-lab-group {
