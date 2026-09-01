@@ -36,7 +36,24 @@ function updateChart(containerId, config) {
     return chart;
 }
 
+function clearChart(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (chartInstances.has(containerId)) {
+        chartInstances.get(containerId).destroy();
+        chartInstances.delete(containerId);
+    }
+    container.querySelector('canvas')?.remove();
+}
+
 export function updateCharts(cardsData, volumes) {
+    if (!Array.isArray(cardsData) || cardsData.length === 0) {
+        ['bohrtiefen', 'materialranking', 'volumenranking'].forEach(clearChart);
+        document.getElementById('legende')?.querySelector('.legend-container')?.remove();
+        return;
+    }
+
     // === BAR CHART: Borehole Depth Comparison ===
     const maxLayerCount = cardsData.reduce((max, item) => Math.max(max, item.layers?.length || 0), 0);
     const datasets = Array.from({ length: maxLayerCount }, (_, layerIndex) => {

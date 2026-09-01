@@ -4,6 +4,8 @@ import { Delaunay } from 'd3-delaunay';
 import { updateCharts } from './chart.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 
+const debugLog = () => {};
+
 const visualisationRuntime = {
   scene: null,
   renderer: null,
@@ -255,13 +257,15 @@ function getVisualControls() {
   const layerThicknessIndex = clampRange(controls.layerThickness, 0, multiplierSequence.length - 1, 0);
   const layerThicknessMultiplier = multiplierSequence[layerThicknessIndex] || 1;
   const layerSpacingM = clampRange(controls.layerSpacing, 0, 25, 0);
+  const layerExplodeScaleXZ = 1 - ((layerSpacingM / 25) * 0.15);
 
   return {
     boreholeDiameterM: 0.08 * boreholeDiameterMultiplier,
     opacity: Math.max(0, 1 - (transparencyPercent / 100)),
     boundingBoxScale: 2 - (boundingboxPercent / 100),
     layerHeightScale: layerThicknessMultiplier,
-    layerSpacingM
+    layerSpacingM,
+    layerExplodeScaleXZ
   };
 }
 
@@ -383,7 +387,7 @@ function buildModelSignature(data) {
   })));
 }
 
-function updateVisualisation (cardsData) {
+function updateVisualisation(cardsData, shouldUpdateCharts = true) {
   const resetViewRequested = window.rummzVisualisationResetViewRequested === true;
   window.rummzVisualisationResetViewRequested = false;
 
@@ -402,11 +406,12 @@ function updateVisualisation (cardsData) {
   const boundingBoxScale = visualControls.boundingBoxScale;
   const layerHeightScale = visualControls.layerHeightScale;
   const layerSpacingM = visualControls.layerSpacingM;
+  const layerExplodeScaleXZ = visualControls.layerExplodeScaleXZ;
 
   if (!Array.isArray(cardsData) || cardsData.length === 0) {
     window.rummzVisualisationModelSignature = '[]';
     publishRummzIfcSnapshot([], [], { x: 0, y: 0, z: 0 });
-    updateCharts([], {});
+    if (shouldUpdateCharts) updateCharts([], {});
     return;
   }
 
@@ -460,10 +465,15 @@ function updateVisualisation (cardsData) {
     })
     .filter(validateBorehole);
 
+  const chartCardsData = cardsData.filter(borehole => validateBorehole(borehole)
+    && borehole.layers.length > 0
+    && borehole.layers.every(isRenderableLayer));
+  const chartBoreholeIds = new Set(chartCardsData.map(borehole => borehole.id));
+
   if (renderCardsData.length === 0) {
     window.rummzVisualisationModelSignature = '[]';
     publishRummzIfcSnapshot([], [], { x: 0, y: 0, z: 0 });
-    updateCharts([], {});
+    if (shouldUpdateCharts) updateCharts([], {});
     return;
   }
 
@@ -580,12 +590,12 @@ function updateVisualisation (cardsData) {
   const extentZ = maxZ - minZ;
   const minGridSize = 20; // 20 METERS
   const gridSize = Math.max(minGridSize, Math.max(extentX, extentZ) * boundingBoxScale);
-  console.log("Grid size:", gridSize);
+  debugLog("Grid size:", gridSize);
 
   // CALC GRID-DIVISION
   const divisions = 5//Math.max(5, Math.round(gridSize / 20));
   //if (divisions % 2 === 0) divisions += 1; // sicherstellen, dass divisions ungerade ist
-  //console.log("Divisions:", divisions);
+  //debugLog("Divisions:", divisions);
 
   // GIVE CALCS TO DASHBOARD
   const gridSizeM_Element = document.getElementById('grid-size-m');
@@ -851,6 +861,7 @@ function updateVisualisation (cardsData) {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       mesh.position.set(x, -(currentDepth + h/2), z);
+      mesh.scale.set(layerExplodeScaleXZ, 1, layerExplodeScaleXZ);
       mesh.userData = {
         layerIndex: idx,
         layerName: layer.name,
@@ -888,7 +899,7 @@ function updateVisualisation (cardsData) {
   const gridMaxZ = centerZ + halfGrid;
 
   const voronoi = delaunay.voronoi([gridMinX, gridMinZ, gridMaxX, gridMaxZ]);
-  console.log("Voronoi cells:", voronoi.cellPolygons());
+  debugLog("Voronoi cells:", voronoi.cellPolygons());
 
   function normalizeCellPolygon(rawCell) {
     if (!rawCell || rawCell.length < 3) return null;
@@ -949,13 +960,16 @@ function updateVisualisation (cardsData) {
       grp.children.forEach(cylinderMesh => {
         ifcMeshes.push(cylinderMesh);
       });
-      console.log(grp);
+      debugLog(grp);
     });
     
     for (let i = 0; i < renderCardsData.length; i++) {
       const borehole = renderCardsData[i];
       const cell = normalizeCellPolygon(voronoi.cellPolygon(i));
       if (!cell) continue;
+      const cellCenter = cell.reduce((center, [x, z]) => ({ x: center.x + x, z: center.z + z }), { x: 0, z: 0 });
+      cellCenter.x /= cell.length;
+      cellCenter.z /= cell.length;
 
       let yOffset = borehole.nhn;
 
@@ -972,9 +986,9 @@ function updateVisualisation (cardsData) {
         const area = THREE.ShapeUtils.area(shape.getPoints());
         const depth = (layer.height / 100) * layerHeightScale;
         const volume = Math.abs(area * depth);
-        console.log(`Bohrung ${i+1} - Schicht ${layerIndex+1} (${layer.name}): Fläche = ${area.toFixed(2)} m², Volumen = ${volume.toFixed(2)} m³`);
+        debugLog(`Bohrung ${i+1} - Schicht ${layerIndex+1} (${layer.name}): Fläche = ${area.toFixed(2)} m², Volumen = ${volume.toFixed(2)} m³`);
 
-        if (layer.name) {
+        if (chartBoreholeIds.has(borehole.id) && layer.name) {
             if (!volumes[layer.name]) {
                 volumes[layer.name] = { volume: 0, color: layer.color };
             }
@@ -1013,6 +1027,9 @@ function updateVisualisation (cardsData) {
         };
 
         mesh.position.set(0, yOffset, 0);
+        mesh.scale.set(layerExplodeScaleXZ, 1, layerExplodeScaleXZ);
+        mesh.position.x = cellCenter.x * (1 - layerExplodeScaleXZ);
+        mesh.position.z = cellCenter.z * (1 - layerExplodeScaleXZ);
         spreadVolumeGroup.add(mesh);
 
         ifcMeshes.push(mesh); // Mesh für IFC sammeln
@@ -1024,7 +1041,7 @@ function updateVisualisation (cardsData) {
       }
     }
     publishRummzIfcSnapshot(renderCardsData, ifcMeshes, ifcOrigin);
-    updateCharts(renderCardsData, volumes);
+    if (shouldUpdateCharts) updateCharts(chartCardsData, volumes);
   }
   
   buildModel();
@@ -1222,7 +1239,7 @@ function updateVisualisation (cardsData) {
         `Treffpunkt Y: ${hit.point.y.toFixed(2)}`
       ];
       showInspectionDetails(infoLines.join('\n'));
-      console.log('RUMMZ ray hit:', {
+      debugLog('RUMMZ ray hit:', {
         boreholeIndex: bhIndex,
         boreholeTitle,
         layerName,
@@ -1311,7 +1328,7 @@ function updateVisualisation (cardsData) {
     if (intersects.length > 0) {
       const obj = intersects[0].object;
       alert('Y-Position: ' + intersects[0].point.y.toFixed(3));
-      console.log("Clicked object:", obj);
+      debugLog("Clicked object:", obj);
     }
   }
   */
@@ -1390,7 +1407,7 @@ if (!window.__rummzPlaneUpdateVisualisationListenerBound) {
   window.addEventListener('updateVisualisation', function(event) {
     if (window.rummzVisualisationMode !== 'plane') return;
     const cardsData = event?.detail?.cardsData;
-    updateVisualisation(cardsData);
+    updateVisualisation(cardsData, event?.detail?.updateCharts !== false);
   });
   window.__rummzPlaneUpdateVisualisationListenerBound = true;
 }

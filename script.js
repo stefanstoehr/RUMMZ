@@ -26,6 +26,7 @@ let projectTitle = '';
 let lastSelectedEPSG = '4326';
 let dashboardSelectedEPSG = lastSelectedEPSG;
 let ifcOverlayRequestId = 0;
+const debugLog = () => {};
 const defaultVisualControls = {
     boreholeDiameter: 0,
     transparency: 0,
@@ -76,6 +77,7 @@ const visualControlConfig = {
 window.rummzVisualControls = Object.assign({}, defaultVisualControls, window.rummzVisualControls || {});
 window.userLocationVisible = window.userLocationVisible === true;
 window.userLocationData = window.userLocationData || null;
+window.groundwaterVisible = window.groundwaterVisible === true;
 const layerNameSuggestions = [
     'Auffüllung',
     'Feinkies',
@@ -279,12 +281,44 @@ if (document.readyState === 'loading') {
 
 // === DATA HELPER FUNCTIONS ===
 
+function createLayerInfo() {
+    return {
+        water: { groundwaterActive: false, groundwaterFrom: '', groundwaterTo: '', fluctuationActive: false, fluctuationFrom: '', fluctuationTo: '', capillaryActive: false, capillaryFrom: '', capillaryTo: '', temporaryActive: false, temporaryFrom: '', temporaryTo: '', zones: [], saturationActive: false, saturation: '', porosityActive: false, porosity: '' },
+        features: { mainSoilActive: false, mainSoil: '', secondaryActive: false, secondary: [], secondaryStrength: {}, mixedSoilActive: false, mixedSoil: '', gradingActive: false, grading: '', organicActive: false, organic: [], organicStrength: {} },
+        description: { colorActive: false, color: '', colorPaletteActive: false, moistureActive: false, moisture: '', consistencyActive: false, consistency: '', densityActive: false, density: '', grainSizeActive: false, grainSize: '', plasticityActive: false, plasticity: '', structureActive: false, structure: '', fabricActive: false, fabric: '', odorActive: false, odor: '', inclusionsActive: false, inclusions: '', geologyActive: false, geology: '' },
+        lab: { sand: '', silt: '', clay: '', gravel: '', grainSizeDistributionActive: false, atterbergLimitsActive: false, liquidLimit: '', plasticLimit: '', shrinkageLimit: '', plasticityIndex: '', consistencyIndex: '', plasticityClassActive: false, plasticityClass: '', organicContent: '', isoGroupActive: false, isoCoarseActive: false, isoCoarse: '', isoMixedActive: false, isoMixed: '', isoFineActive: false, isoFine: '', isoOrganicActive: false, isoOrganic: '', isoArtificialActive: false, isoRockActive: false, dryUnitWeight: '', saturatedUnitWeight: '', waterContent: '', permeability: '', settlementActive: false, settlement: '', frostActive: false, frost: '', compactabilityActive: false, compactability: '', spt: '', grainDensity: '', additionalValuesActive: false, shearStrengthActive: false, cohesionEffective: '', cohesionUndrained: '', frictionAngle: '' }
+    };
+}
+
+function normalizeLayerInfo(info) {
+    const defaults = createLayerInfo();
+    const selectedValues = (value) => Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
+    const normalizeBoolean = (value, fallback) => value === true || value === 'true' || value === 1 || value === '1'
+        ? true
+        : value === false || value === 'false' || value === 0 || value === '0'
+            ? false
+            : fallback;
+    const normalizeBooleanSection = (defaultsSection, importedSection) => Object.fromEntries(
+        Object.entries({ ...defaultsSection, ...(importedSection || {}) }).map(([key, value]) => [
+            key,
+            typeof defaultsSection[key] === 'boolean' ? normalizeBoolean(value, defaultsSection[key]) : value
+        ])
+    );
+    return {
+        water: { ...normalizeBooleanSection(defaults.water, info?.water), zones: selectedValues(info?.water?.zones) },
+        features: { ...normalizeBooleanSection(defaults.features, info?.features), secondary: selectedValues(info?.features?.secondary), secondaryStrength: { ...(info?.features?.secondaryStrength || {}) }, organic: selectedValues(info?.features?.organic), organicStrength: { ...(info?.features?.organicStrength || {}) } },
+        description: normalizeBooleanSection(defaults.description, info?.description),
+        lab: normalizeBooleanSection(defaults.lab, info?.lab)
+    };
+}
+
 function createNewLayer(cardId, layerNum) {
     return {
         id: `${cardId}-layer-${layerNum}-${Date.now()}`,
         name: '',
         height: null, // Stored in cm
-        color: '#000000' // Default color
+        color: '#000000', // Default color
+        info: createLayerInfo()
     };
 }
 
@@ -506,6 +540,7 @@ function clearCardCoords(card) {
     delete markerInstances[card.id];
     clearCoordsInputError(card.id);
     updateCoordsInputs(card.id, null);
+    refreshWaterFaderControls(card);
 }
 
 function commitCoordinateInputs(cardId) {
@@ -553,6 +588,7 @@ function commitCoordinateInputs(cardId) {
     card.coords = wgsCoords;
     syncCardMarker(card, { centerMap: true });
     updateCoordsInputs(cardId, wgsCoords);
+    refreshWaterFaderControls(card);
     triggerVisualisationUpdate();
 }
 
@@ -646,12 +682,15 @@ function hexToRgb(hex) {
  * Triggers 3D visualization update event
  * Sends current cardsData to visualization listeners
  */
-function triggerVisualisationUpdate() {
+function triggerVisualisationUpdate(options = {}) {
+    const updateCharts = options.updateCharts !== false;
     updateUICardControls();
+    updateGroundwaterToggleAvailability();
     window.dispatchEvent(new CustomEvent('updateVisualisation', {
         detail: {
             cardsData: cardsData,
-            visualControls: window.rummzVisualControls
+            visualControls: window.rummzVisualControls,
+            updateCharts
         }
     }));
 }
@@ -717,7 +756,7 @@ function bindDashboardFaderControls(faderSection) {
         const applyValue = () => {
             setVisualControlValue(control, slider.value);
             updateDashboardFaderValueLabel(faderSection, id, control, window.rummzVisualControls[control]);
-            triggerVisualisationUpdate();
+            triggerVisualisationUpdate({ updateCharts: false });
         };
 
         slider.addEventListener('input', applyValue);
@@ -966,6 +1005,125 @@ function applyAutoColorForLayer(cardId, layer) {
     }
 }
 
+function getLayerInfoSelectOptions(options, selectedValue) {
+    return `<option value="">Bitte wählen</option>${options.map(option => `<option value="${option}" ${option === selectedValue ? 'selected' : ''}>${option}</option>`).join('')}`;
+}
+
+function getLayerInfoField(section, key, label, value, options = null, attributes = '') {
+    const control = options
+        ? `<select data-layer-info-section="${section}" data-layer-info-key="${key}">${getLayerInfoSelectOptions(options, value)}</select>`
+        : `<input data-layer-info-section="${section}" data-layer-info-key="${key}" value="${value || ''}" ${attributes}>`;
+    return `<div class="layer-info-field"><label>${label}</label>${control}</div>`;
+}
+
+function getLayerWaterBounds(card, layerIndex) {
+    const top = Number(card?.nhn) - card.layers.slice(0, layerIndex).reduce((sum, layer) => sum + (Number(layer.height) || 0) / 100, 0);
+    const bottom = top - (Number(card?.layers[layerIndex]?.height) || 0) / 100;
+    const hasCoordinates = Number.isFinite(card?.coords?.lat) && Number.isFinite(card?.coords?.lng);
+    const isReady = hasCoordinates && typeof card?.nhn === 'number' && Number.isFinite(card.nhn) && Number(card?.layers[layerIndex]?.height) > 0;
+    return { top, bottom, isReady };
+}
+
+function hasValidGroundwaterData() {
+    return cardsData.some(card => Array.isArray(card?.layers) && card.layers.some(layer => {
+        const water = layer?.info?.water;
+        const upper = parseWaterElevation(water?.groundwaterFrom);
+        const lower = parseWaterElevation(water?.groundwaterTo);
+        return water?.groundwaterActive === true && Number.isFinite(upper) && Number.isFinite(lower) && upper >= lower;
+    }));
+}
+
+function updateGroundwaterToggleAvailability() {
+    const toggle = document.querySelector('.map-icon-stack .bi-droplet');
+    if (!toggle) return;
+    const available = hasValidGroundwaterData();
+    if (!available) window.groundwaterVisible = false;
+    toggle.classList.toggle('active', available && window.groundwaterVisible === true);
+    toggle.setAttribute('aria-pressed', String(available && window.groundwaterVisible === true));
+}
+
+function parseWaterElevation(value) {
+    const normalized = String(value ?? '').trim().replace(',', '.');
+    return normalized === '' ? null : Number(normalized);
+}
+
+function formatWaterElevation(value) {
+    return Number(value).toFixed(2).replace('.', ',');
+}
+
+function getLayerWaterInputs(prefix, label, values, bounds, layerIndex) {
+    const activeKey = `${prefix}Active`;
+    const upperKey = `${prefix}From`;
+    const lowerKey = `${prefix}To`;
+    const storedUpperValue = parseWaterElevation(values[upperKey]);
+    const storedLowerValue = parseWaterElevation(values[lowerKey]);
+    const upperValue = Number.isFinite(storedUpperValue) ? storedUpperValue : bounds.top;
+    const lowerValue = Number.isFinite(storedLowerValue) ? storedLowerValue : bounds.bottom;
+    const allowsAboveGroundwater = prefix === 'groundwater' && layerIndex === 0;
+    const disabled = !bounds.isReady || !values[activeKey];
+    const clamp = value => Math.max(bounds.bottom, Math.min(bounds.top, value));
+    const upperDisplayValue = allowsAboveGroundwater ? Math.max(bounds.bottom, upperValue) : clamp(upperValue);
+    const upperMaxAttribute = allowsAboveGroundwater ? '' : `data-water-max="${bounds.top}"`;
+    return `<div class="water-input-group ${disabled ? 'is-disabled' : ''}"><label class="water-input-title"><input type="checkbox" data-layer-info-section="water" data-layer-info-key="${activeKey}" ${values[activeKey] ? 'checked' : ''} ${bounds.isReady ? '' : 'disabled'}><span>${label}</span></label><label>UK (m)<input type="text" inputmode="decimal" value="${formatWaterElevation(clamp(lowerValue))}" data-layer-info-section="water" data-layer-info-key="${lowerKey}" data-water-min="${bounds.bottom}" data-water-max="${bounds.top}" aria-label="${label} Unterkante in Metern" ${disabled ? 'disabled' : ''}></label><label>OK (m)<input type="text" inputmode="decimal" value="${formatWaterElevation(upperDisplayValue)}" data-layer-info-section="water" data-layer-info-key="${upperKey}" data-water-min="${bounds.bottom}" ${upperMaxAttribute} aria-label="${label} Oberkante in Metern" ${disabled ? 'disabled' : ''}></label></div>`;
+}
+
+function getLayerWaterValueInput(activeKey, valueKey, label, shortLabel, value) {
+    const disabled = !value?.[activeKey];
+    return `<div class="water-input-group water-value-group ${disabled ? 'is-disabled' : ''}"><label class="water-input-title"><input type="checkbox" data-layer-info-section="water" data-layer-info-key="${activeKey}" ${value?.[activeKey] ? 'checked' : ''}><span>${label}</span></label><label>${shortLabel}<input type="text" inputmode="decimal" value="${value?.[valueKey] || ''}" data-layer-info-section="water" data-layer-info-key="${valueKey}" aria-label="${label} in Prozent" ${disabled ? 'disabled' : ''}></label></div>`;
+}
+
+function getLayerInfoMarkup(card, layer, layerIndex) {
+    const info = normalizeLayerInfo(layer.info);
+    const waterBounds = getLayerWaterBounds(card, layerIndex);
+    const predefinedColors = [{ name: 'Rot', value: '#ff0004' }, { name: 'Orange', value: '#ff8000' }, { name: 'Gelb', value: '#fff200' }, { name: 'Pink', value: '#ff00aa' }, { name: 'Lila', value: '#7a5cff' }, { name: 'Blau', value: '#007bff' }, { name: 'Blaugrau', value: '#4e79a7' }, { name: 'Cyan', value: '#00e1ff' }, { name: 'Türkis', value: '#20c991' }, { name: 'Hellgrün', value: '#1eff00' }, { name: 'Grün', value: '#0c6700' }, { name: 'Oliv', value: '#6b8e23' }, { name: 'Braun', value: '#8d6e63' }, { name: 'Gelbbraun', value: '#b8810b' }, { name: 'Schwarz', value: '#000000' }, { name: 'Grau', value: '#8b8b8b' }, { name: 'Weiß', value: '#ffffff' }];
+    const isFeatureGroupActive = (activeKey, value) => info.features[activeKey] === true || (Array.isArray(value) ? value.length > 0 : Boolean(value));
+    const featureField = (activeKey, key, label, options) => {
+        const active = isFeatureGroupActive(activeKey, info.features[key]);
+        return `<div class="layer-info-field layer-info-feature-group layer-info-feature-group--full ${active ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="features" data-layer-info-key="${activeKey}" ${active ? 'checked' : ''}><span>${label}</span></label><select data-layer-info-section="features" data-layer-info-key="${key}" ${active ? '' : 'disabled'}>${getLayerInfoSelectOptions(options, info.features[key])}</select></div>`;
+    };
+    const choices = (activeKey, key, label, options, selected, strengthKey) => {
+        const active = isFeatureGroupActive(activeKey, selected);
+        return `<div class="layer-info-choice-group layer-info-feature-group layer-info-feature-group--full ${active ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="features" data-layer-info-key="${activeKey}" ${active ? 'checked' : ''}><span>${label}</span></label><div class="layer-info-choices">${options.map(value => `<div class="layer-info-choice"><label><input type="checkbox" value="${value}" data-layer-info-section="features" data-layer-info-key="${key}" ${selected.includes(value) ? 'checked' : ''} ${active ? '' : 'disabled'}><span>${value}</span></label><select data-layer-info-section="features" data-layer-info-key="${strengthKey}" data-layer-info-option="${value}" ${active ? '' : 'disabled'}>${getLayerInfoSelectOptions(['schwach', 'normal', 'stark'], info.features[strengthKey]?.[value] || '')}</select></div>`).join('')}</div></div>`;
+    };
+    const descriptionField = (activeKey, key, label, options = null, fullWidth = false) => {
+        const active = info.description[activeKey] === true || Boolean(info.description[key]);
+        const control = options
+            ? `<select data-layer-info-section="description" data-layer-info-key="${key}" ${active ? '' : 'disabled'}>${getLayerInfoSelectOptions(options, info.description[key])}</select>`
+            : `<input type="text" data-layer-info-section="description" data-layer-info-key="${key}" value="${info.description[key] || ''}" ${active ? '' : 'disabled'}>`;
+        return `<div class="layer-info-field layer-info-description-group ${fullWidth ? 'layer-info-description-group--full' : ''} ${key === 'color' ? 'layer-info-description-group--stacked' : ''} ${active ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="description" data-layer-info-key="${activeKey}" ${active ? 'checked' : ''}><span>${label}</span></label>${control}</div>`;
+    };
+    const colorPaletteGroup = `<div class="layer-info-color-palette-group ${info.description.colorPaletteActive ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="description" data-layer-info-key="colorPaletteActive" ${info.description.colorPaletteActive ? 'checked' : ''}><span>Farbe auswählen</span></label><div class="color-swatch-row" role="list" aria-label="Vordefinierte Farben">${predefinedColors.map(({ name, value }) => `<button type="button" class="color-swatch" data-card-id="${card.id}" data-layer-id="${layer.id}" data-color="${value}" style="background-color:${value}" title="${name}" aria-label="Farbe ${name}" ${info.description.colorPaletteActive ? '' : 'disabled'}><span>${name}</span></button>`).join('')}<label class="color-picker-custom"><input type="color" class="layer-color-picker" data-card-id="${card.id}" data-layer-id="${layer.id}" value="${layer.color || '#000000'}" aria-label="Eigene Schichtfarbe wählen" ${info.description.colorPaletteActive ? '' : 'disabled'}><span>Eigene</span></label></div></div>`;
+    const labNumber = (key, label, step = '0.1', disabled = '') => getLayerInfoField('lab', key, label, info.lab[key], null, `type="number" step="${step}" inputmode="decimal" ${['plasticityIndex', 'consistencyIndex'].includes(key) ? 'readonly' : ''} ${disabled}`);
+    const isoOption = (activeKey, key, label, options) => {
+        const active = info.lab[activeKey] === true;
+        const control = options ? `<select data-layer-info-section="lab" data-layer-info-key="${key}" ${active && info.lab.isoGroupActive ? '' : 'disabled'}>${getLayerInfoSelectOptions(options, info.lab[key])}</select>` : '';
+        return `<div class="layer-info-iso-option ${active ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="lab" data-layer-info-key="${activeKey}" ${active ? 'checked' : ''} ${info.lab.isoGroupActive ? '' : 'disabled'}><span>${label}</span></label>${control}</div>`;
+    };
+    const isoGroup = `<div class="layer-info-field-group layer-info-iso-group ${info.lab.isoGroupActive ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="lab" data-layer-info-key="isoGroupActive" ${info.lab.isoGroupActive ? 'checked' : ''}><span>ISO-Gruppe Böden</span></label><div class="layer-info-iso-options">${isoOption('isoCoarseActive', 'isoCoarse', '1. Grobkörnig', ['GW', 'GE', 'GI', 'SW', 'SE'])}${isoOption('isoMixedActive', 'isoMixed', '2. Gemischtkörnig', ['GU', 'GT', 'SU', 'ST'])}${isoOption('isoFineActive', 'isoFine', '3. Feinkörnig', ['U-n/UL', 'U-m/UM', 'U-h/UA', 'T-n/TL', 'T-m/TM', 'T-h/TA'])}${isoOption('isoOrganicActive', 'isoOrganic', '4. Organisch', ['HN', 'HZ', 'OH', 'OT', 'Pt'])}${isoOption('isoArtificialActive', '', '5. Künstlich (A/FA)')}${isoOption('isoRockActive', '', '6. Fels (FP/R)')}</div></div>`;
+    const grainSizeDistributionDisabled = info.lab.grainSizeDistributionActive ? '' : 'disabled';
+    const atterbergLimitsDisabled = info.lab.atterbergLimitsActive ? '' : 'disabled';
+    const grainSizeDistributionGroup = `<div class="layer-info-field-group layer-info-grain-size-group ${info.lab.grainSizeDistributionActive ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="lab" data-layer-info-key="grainSizeDistributionActive" ${info.lab.grainSizeDistributionActive ? 'checked' : ''}><span>Korngrößenverteilung (%)</span></label><div class="layer-info-inline-fields">${labNumber('sand', 'Sand', '0.1', grainSizeDistributionDisabled)}${labNumber('silt', 'Schluff', '0.1', grainSizeDistributionDisabled)}${labNumber('clay', 'Ton', '0.1', grainSizeDistributionDisabled)}${labNumber('gravel', 'Kies', '0.1', grainSizeDistributionDisabled)}</div></div>`;
+    const atterbergLimitsGroup = `<div class="layer-info-field-group layer-info-atterberg-group ${info.lab.atterbergLimitsActive ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="lab" data-layer-info-key="atterbergLimitsActive" ${info.lab.atterbergLimitsActive ? 'checked' : ''}><span>Atterberg-Grenzen (%)</span></label><div class="layer-info-inline-fields">${labNumber('waterContent', 'w (%)', '0.01', atterbergLimitsDisabled)}${labNumber('liquidLimit', 'w<sub>L</sub> / LL', '0.1', atterbergLimitsDisabled)}${labNumber('plasticLimit', 'w<sub>P</sub> / PL', '0.1', atterbergLimitsDisabled)}${labNumber('shrinkageLimit', 'w<sub>S</sub>', '0.1', atterbergLimitsDisabled)}</div></div>`;
+    const plasticityIndicesGroup = `<div class="layer-info-field-group layer-info-plasticity-indices-group ${info.lab.atterbergLimitsActive ? '' : 'is-disabled'}"><div class="layer-info-inline-fields">${labNumber('plasticityIndex', 'Plastizitätszahl I<sub>P</sub> (%)', '0.1', atterbergLimitsDisabled)}${labNumber('consistencyIndex', 'Konsistenzzahl I<sub>C</sub>', '0.01', atterbergLimitsDisabled)}</div></div>`;
+    const plasticityClassGroup = `<div class="layer-info-field layer-info-description-group layer-info-description-group--full layer-info-plasticity-class-group ${info.lab.plasticityClassActive ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="lab" data-layer-info-key="plasticityClassActive" ${info.lab.plasticityClassActive ? 'checked' : ''}><span>Plastizitätskl.</span></label><select data-layer-info-section="lab" data-layer-info-key="plasticityClass" ${info.lab.plasticityClassActive ? '' : 'disabled'}>${getLayerInfoSelectOptions(['niedrig', 'mittel', 'hoch'], info.lab.plasticityClass)}</select></div>`;
+    const settlementGroup = `<div class="layer-info-field layer-info-description-group layer-info-description-group--full layer-info-settlement-group ${info.lab.settlementActive ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="lab" data-layer-info-key="settlementActive" ${info.lab.settlementActive ? 'checked' : ''}><span>Setzungsempf.</span></label><select data-layer-info-section="lab" data-layer-info-key="settlement" ${info.lab.settlementActive ? '' : 'disabled'}>${getLayerInfoSelectOptions(['gering', 'mittel', 'hoch'], info.lab.settlement)}</select></div>`;
+    const compactabilityGroup = `<div class="layer-info-field layer-info-description-group layer-info-description-group--full layer-info-compactability-group ${info.lab.compactabilityActive ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="lab" data-layer-info-key="compactabilityActive" ${info.lab.compactabilityActive ? 'checked' : ''}><span>Verdichtbarkeit</span></label><select data-layer-info-section="lab" data-layer-info-key="compactability" ${info.lab.compactabilityActive ? '' : 'disabled'}>${getLayerInfoSelectOptions(['gut', 'mittel', 'schlecht'], info.lab.compactability)}</select></div>`;
+    const additionalValuesDisabled = info.lab.additionalValuesActive ? '' : 'disabled';
+    const materialPropertiesGroup = `<div class="layer-info-field-group layer-info-material-properties-group"><div class="layer-info-inline-fields">${labNumber('organicContent', 'Glühv. (%)', '0.01', additionalValuesDisabled)}${labNumber('dryUnitWeight', 'γ<sub>d</sub> (kN/m3)', '0.1', additionalValuesDisabled)}${labNumber('saturatedUnitWeight', 'γ<sub>s</sub> (kN/m3)', '0.1', additionalValuesDisabled)}</div></div>`;
+    const additionalLabValuesGroup = `<div class="layer-info-field-group layer-info-additional-lab-values-group"><div class="layer-info-inline-fields">${labNumber('permeability', 'k<sub>f</sub> (m/s)', 'any', additionalValuesDisabled)}${labNumber('spt', 'N<sub>60</sub>', '1', additionalValuesDisabled)}${labNumber('grainDensity', 'ρ<sub>s</sub> (g/cm3)', '0.01', additionalValuesDisabled)}</div></div>`;
+    const frostGroup = `<div class="layer-info-field layer-info-description-group layer-info-description-group--full layer-info-frost-group ${info.lab.frostActive ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="lab" data-layer-info-key="frostActive" ${info.lab.frostActive ? 'checked' : ''}><span>Frostempfindl.</span></label><select data-layer-info-section="lab" data-layer-info-key="frost" ${info.lab.frostActive ? '' : 'disabled'}>${getLayerInfoSelectOptions(['F1 (nicht frostempfindlich)', 'F2 (gering bis mittel)', 'F3 (sehr frostempfindlich)'], info.lab.frost)}</select></div>`;
+    const shearStrengthInput = (key, label, step = '0.1') => `<label>${label}<input type="number" step="${step}" inputmode="decimal" value="${info.lab[key] || ''}" data-layer-info-section="lab" data-layer-info-key="${key}" ${additionalValuesDisabled}></label>`;
+    const shearStrengthGroup = `<div class="layer-info-field-group layer-info-shear-group"><div class="layer-info-inline-fields">${shearStrengthInput('cohesionEffective', "c′ (kN/m2)")}${shearStrengthInput('cohesionUndrained', 'c<sub>u</sub> (kN/m2)')}${shearStrengthInput('frictionAngle', "φ′ (Grad)")}</div></div>`;
+    const additionalValuesGroup = `<div class="layer-info-lab-group layer-info-additional-values-group ${info.lab.additionalValuesActive ? '' : 'is-disabled'}"><label><input type="checkbox" data-layer-info-section="lab" data-layer-info-key="additionalValuesActive" ${info.lab.additionalValuesActive ? 'checked' : ''}><span>Weitere Werte</span></label><div class="layer-info-additional-values-content">${materialPropertiesGroup}${additionalLabValuesGroup}${shearStrengthGroup}</div></div>`;
+    const labGroups = `<div class="layer-info-lab-group">${isoGroup}</div><div class="layer-info-lab-group">${grainSizeDistributionGroup}</div><div class="layer-info-lab-group">${atterbergLimitsGroup}${plasticityIndicesGroup}</div><div class="layer-info-lab-group layer-info-lab-group--properties">${plasticityClassGroup}${settlementGroup}${compactabilityGroup}${frostGroup}</div>${additionalValuesGroup}`;
+    return `<div class="layer-info-toolbar" role="toolbar" aria-label="Schichtinformationen"><button type="button" class="layer-info-toggle" data-layer-info-panel="color" aria-expanded="false" aria-controls="layer-info-color-${layer.id}" title="Farbe" aria-label="Farbe"><i class="bi bi-palette"></i><span>Farbe</span></button><button type="button" class="layer-info-toggle" data-layer-info-panel="water" aria-expanded="false" aria-controls="layer-info-water-${layer.id}" title="Wasser" aria-label="Wasser"><i class="bi bi-droplet"></i><span>H₂O</span></button><button type="button" class="layer-info-toggle" data-layer-info-panel="features" aria-expanded="false" aria-controls="layer-info-features-${layer.id}" title="Merkmale" aria-label="Merkmale"><i class="bi bi-clipboard-data"></i><span>Stats</span></button><button type="button" class="layer-info-toggle" data-layer-info-panel="description" aria-expanded="false" aria-controls="layer-info-description-${layer.id}" title="Beschreibung" aria-label="Beschreibung"><i class="bi bi-newspaper"></i><span>Info</span></button><button type="button" class="layer-info-toggle" data-layer-info-panel="lab" aria-expanded="false" aria-controls="layer-info-lab-${layer.id}" title="Laborwerte" aria-label="Laborwerte"><i class="bi bi-search"></i><span>Labor</span></button></div>
+        <section id="layer-info-color-${layer.id}" class="layer-info-panel" data-layer-info-panel-content="color" hidden><div class="layer-info-grid layer-info-grid-description">${descriptionField('colorActive', 'color', 'Farbe beschreiben', null, true)}${colorPaletteGroup}</div></section>
+        <section id="layer-info-water-${layer.id}" class="layer-info-panel" data-layer-info-panel-content="water" hidden><div class="layer-water-inputs">${getLayerWaterInputs('groundwater', 'Grundwasserstand', info.water, waterBounds, layerIndex)}${getLayerWaterInputs('fluctuation', 'Schwankungsbereich', info.water, waterBounds, layerIndex)}${getLayerWaterInputs('capillary', 'Kapillarwasserzone', info.water, waterBounds, layerIndex)}${getLayerWaterInputs('temporary', 'Temporäre Wasserzone', info.water, waterBounds, layerIndex)}</div><div class="layer-info-grid">${getLayerWaterValueInput('saturationActive', 'saturation', 'Sättigung', 'Sᵣ (%)', info.water)}${getLayerWaterValueInput('porosityActive', 'porosity', 'Porosität', 'n (%)', info.water)}</div></section>
+        <section id="layer-info-features-${layer.id}" class="layer-info-panel" data-layer-info-panel-content="features" hidden><div class="layer-info-grid layer-info-grid-features">${featureField('mainSoilActive', 'mainSoil', 'Hauptbodenart', ['Kies (G)', 'Sand (S)', 'Schluff (U)', 'Ton (T)', 'Torf (H)', 'Mudde (Mu)', 'Auffüllung (A/FA)', 'Geschiebelehm (Lg)', 'Geschiebemergel (Mg)', 'Fels (R)'])}${choices('secondaryActive', 'secondary', 'Nebenanteile', ['g kiesig', 's sandig', 'u schluffig', 't tonig', 'h humos/torfig', 'o organisch'], info.features.secondary, 'secondaryStrength')}${featureField('mixedSoilActive', 'mixedSoil', 'Gemischboden', ['Kies-Schluff-Gemisch (GU)', 'Kies-Ton-Gemisch (GT)', 'Sand-Schluff-Gemisch (SU)', 'Sand-Ton-Gemisch (ST)', 'Schluff-Ton-Gemisch (UT)'])}${featureField('gradingActive', 'grading', 'Abstufungen', ['Kies weitgestuft (GW)', 'Kies enggestuft (GE)', 'Kies intermediärgestuft (GI)', 'Sand weitgestuft (SW)', 'Sand enggestuft (SE)', 'Sand intermediärgestuft (SI)'])}${choices('organicActive', 'organic', 'Organik-Zusätze', ['humos', 'organisch', 'torfig'], info.features.organic, 'organicStrength')}</div></section>
+        <section id="layer-info-description-${layer.id}" class="layer-info-panel" data-layer-info-panel-content="description" hidden><div class="layer-info-grid layer-info-grid-description">${descriptionField('moistureActive', 'moisture', 'Feuchte', ['trocken', 'feucht', 'nass', 'gesättigt'])}${descriptionField('consistencyActive', 'consistency', 'Konsistenz', ['breiig', 'breiig - weich', 'weich', 'weich - steif', 'steif', 'steif - halbfest', 'halbfest', 'halbfest - fest', 'fest'])}${descriptionField('densityActive', 'density', 'Lagerung', ['locker', 'mitteldicht', 'dicht'])}${descriptionField('grainSizeActive', 'grainSize', 'Korngröße', ['fein', 'mittel', 'grob', 'schluffig', 'tonig'])}${descriptionField('plasticityActive', 'plasticity', 'Plastizität', ['niedrig/leicht (L)', 'mittel (M)', 'hoch/ausgeprägt (A)'])}${descriptionField('structureActive', 'structure', 'Struktur', ['geschichtet', 'ungeschichtet', 'klumpig', 'blockig'])}${descriptionField('fabricActive', 'fabric', 'Gefüge', ['porös', 'dicht', 'locker'])}${descriptionField('odorActive', 'odor', 'Geruch', ['humos', 'torfig', 'faulig', 'neutral'])}${descriptionField('inclusionsActive', 'inclusions', 'Einschlüsse', ['Steine', 'Wurzeln', 'Muscheln', 'Holz', 'Bauschutt', 'organische Reste', 'archäologische Besonderheiten'])}${descriptionField('geologyActive', 'geology', 'Geologie', ['glazial', 'fluviatil', 'äolisch', 'anthropogen'])}</div></section>
+        <section id="layer-info-lab-${layer.id}" class="layer-info-panel" data-layer-info-panel-content="lab" hidden><div class="layer-info-grid layer-info-grid-lab">${labGroups}</div></section>`;
+}
+
 // === LAYER RENDER/UPDATE FUNCTIONS ===
 
 /**
@@ -994,6 +1152,7 @@ function renderLayers(card, container) {
         const layerDiv = document.createElement('div');
         layerDiv.className = 'card-layer';
         layerDiv.id = layer.id;
+        layerDiv.dataset.cardId = card.id;
         const layerColor = layer.color || '#000000';
         layerDiv.style.borderLeftColor = layerColor;
         const heightInCm = (typeof layer.height === 'number') ? layer.height : '';
@@ -1005,42 +1164,10 @@ function renderLayers(card, container) {
         const bottomNhnText = `${(baseNhn - bottomDepthM).toFixed(2)} m`;
         const bottomDepthText = `${bottomDepthM.toFixed(2)} m`;
         const boundaryText = `NHN: ${bottomNhnText} | Tiefe: ${bottomDepthText}`;
-        const predefinedColors = [
-            { name: 'Rot', value: '#ff0004' },
-            { name: 'Orange', value: '#ff8000' },
-            { name: 'Gelb', value: '#fff200' },
-            { name: 'Magenta/Pink', value: '#ff00aa' },
-            { name: 'Violett/Lila', value: '#7a5cff' },
-            { name: 'Blau', value: '#007bff' },
-            { name: 'Blaugrau', value: '#4e79a7' },
-            { name: 'Cyan/Hellblau', value: '#00e1ff' },
-            { name: 'Türkis', value: '#20c991' },
-            { name: 'Hellgrün', value: '#1eff00' },
-            { name: 'Grün', value: '#0c6700' },
-            { name: 'Oliv', value: '#6b8e23' },
-            { name: 'Braun', value: '#8d6e63' },
-            { name: 'Gelbbraun', value: '#b8810b' },
-            { name: 'Schwarz', value: '#000000' },
-            { name: 'Grau', value: '#8b8b8b' },
-            { name: 'Weiß', value: '#ffffff' }
-        ];
-
         layerDiv.innerHTML = `
             <div class="layer-header">
                 <div class="layer-title-block">
                     <strong>Schicht ${layerIndex + 1} <span class="card-title-total">von ${totalLayers}</span></strong>
-                    <div class="color-picker-group">
-                        <button type="button" class="color-picker-plus" aria-label="Eigene Farbe auswählen" title="Eigene Farbe auswählen" style="color:${layerColor}; border-color:${layerColor};">
-                            +
-                            <input type="color" class="layer-color-picker"
-                                   data-card-id="${card.id}" data-layer-id="${layer.id}" value="${layerColor}" aria-label="Schichtfarbe wählen">
-                        </button>
-                        <div class="color-swatch-row" role="list" aria-label="Vordefinierte Farben">
-                            ${predefinedColors.map(({ name, value }) => `
-                                <button type="button" class="color-swatch" data-card-id="${card.id}" data-layer-id="${layer.id}" data-color="${value}" style="background-color:${value}" title="${name}" aria-label="Farbe ${name}"></button>
-                            `).join('')}
-                        </div>
-                    </div>
                 </div>
                 <button class="delete-layer-btn ${card.layers.length <= 1 ? 'invisible' : ''}" aria-label="Schicht löschen" data-card-id="${card.id}" data-layer-id="${layer.id}"><i class="bi bi-x-circle" aria-hidden="true"></i></button>
             </div>
@@ -1083,6 +1210,7 @@ function renderLayers(card, container) {
                            data-card-id="${card.id}" data-layer-id="${layer.id}" value="${heightInCm}">
                 </div>
             </div>
+            ${getLayerInfoMarkup(card, layer, layerIndex)}
         `;
         fragment.appendChild(layerDiv);
 
@@ -1144,6 +1272,12 @@ function refreshLayerMetricLabels(card) {
 
         cumulativeDepth = bottomDepthM;
     });
+}
+
+function refreshWaterFaderControls(card) {
+    const cardElement = document.getElementById(card.id);
+    const layersContainer = cardElement?.querySelector('.layers-container');
+    if (layersContainer) renderLayers(card, layersContainer);
 }
 
 // === CARD RENDER/UPDATE FUNCTIONS ===
@@ -1734,6 +1868,7 @@ function initialRender() {
                 <button type="button" class="map-icon-btn bi bi-map" title="Topografie" aria-label="Topografie"></button>
                 <button type="button" class="map-icon-btn bi bi-crosshair" title="Dein Standort" aria-label="Dein Standort"></button>
                 <button type="button" class="map-icon-btn bi bi-arrows-angle-contract" title="Ansicht zurücksetzen" aria-label="Ansicht zurücksetzen"></button>
+                <button type="button" class="map-icon-btn bi bi-droplet" title="Grundwasser" aria-label="Grundwasser"></button>
             </div>
             <div class="map-attribution">
                 <a href="https://threejs.org" target="_blank" rel="noopener noreferrer">three.js</a><span>&nbsp;|</span>
@@ -1866,6 +2001,22 @@ function initialRender() {
             event.stopPropagation();
             window.dispatchEvent(new CustomEvent('resetVisualisationView'));
             triggerVisualisationUpdate();
+        });
+    }
+
+    const groundwaterToggle = mapDiv.querySelector('.map-icon-stack .bi-droplet');
+    if (groundwaterToggle) {
+        updateGroundwaterToggleAvailability();
+        groundwaterToggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (!hasValidGroundwaterData()) return;
+            window.groundwaterVisible = !window.groundwaterVisible;
+            updateGroundwaterToggleAvailability();
+            window.dispatchEvent(new CustomEvent('toggleGroundwater', {
+                detail: { visible: window.groundwaterVisible }
+            }));
+            triggerVisualisationUpdate({ updateCharts: false });
         });
     }
 
@@ -2026,6 +2177,7 @@ ${getEpsgSelectOptions(dashboardSelectedEPSG)}
     previewDiv.appendChild(volumenrankingDiv);
 
     gridContent.appendChild(previewDiv);
+    updateGroundwaterToggleAvailability();
 
     cardsData.forEach(initLeafletMap);
     updateUICardControls();
@@ -2304,6 +2456,7 @@ gridContent.addEventListener('click', function(event) {
     if (handleDeleteCardClick(target)) return;
     if (handleAddLayerClick(target)) return;
     if (handleDeleteLayerClick(target)) return;
+    if (handleLayerInfoToggleClick(target)) return;
 
     handleHideInfoClick(target);
 });
@@ -2411,7 +2564,6 @@ function handleCardMetaInput(target, card) {
     if (target.name === 'nhn') {
         card.nhn = target.value ? parseFloat(target.value) : null;
         refreshLayerMetricLabels(card);
-        triggerVisualisationUpdate();
     }
 }
 
@@ -2445,12 +2597,148 @@ function handleLayerDataInput(target, card, layerId) {
         layer.name = target.value;
         applyAutoColorForLayer(card.id, layer);
         showLayerNameMenuForInput(target);
+        return true;
     } else if (target.name === 'layerheight') {
         layer.height = target.value ? parseFloat(target.value, 10) : null;
         refreshLayerMetricLabels(card);
+        return true;
     }
 
     triggerVisualisationUpdate();
+    return true;
+}
+
+function updateLayerLabCalculations(layer) {
+    const lab = layer.info.lab;
+    const parseLabNumber = (value) => {
+        const normalized = String(value ?? '').trim().replace(',', '.');
+        return normalized === '' ? null : Number(normalized);
+    };
+    const liquidLimit = parseLabNumber(lab.liquidLimit);
+    const plasticLimit = parseLabNumber(lab.plasticLimit);
+    const waterContent = parseLabNumber(lab.waterContent);
+    if (!Number.isFinite(liquidLimit) || !Number.isFinite(plasticLimit)) {
+        lab.plasticityIndex = '';
+        lab.consistencyIndex = '';
+        return;
+    }
+    const plasticityIndex = liquidLimit - plasticLimit;
+    lab.plasticityIndex = Number.isFinite(plasticityIndex) ? plasticityIndex.toFixed(1) : '';
+    lab.consistencyIndex = Number.isFinite(plasticityIndex) && plasticityIndex !== 0 && Number.isFinite(waterContent) ? ((liquidLimit - waterContent) / plasticityIndex).toFixed(2) : '';
+}
+
+function updateGrainSizeValidity(layerElement) {
+    const grainKeys = ['sand', 'silt', 'clay', 'gravel'];
+    const inputs = grainKeys.map(key => layerElement?.querySelector(`[data-layer-info-section="lab"][data-layer-info-key="${key}"]`));
+    const values = inputs.map(input => Number(String(input?.value || '').replace(',', '.')));
+    const hasCompleteSet = values.every(Number.isFinite);
+    const isValid = !hasCompleteSet || Math.abs(values.reduce((sum, value) => sum + value, 0) - 100) < 0.001;
+    inputs.forEach(input => input?.setCustomValidity(isValid ? '' : 'Die Korngrößenverteilung muss insgesamt 100 % ergeben.'));
+}
+
+function handleLayerInfoInput(target, card, layerId) {
+    const section = target.dataset.layerInfoSection;
+    const key = target.dataset.layerInfoKey;
+    if (!section || !key) return false;
+    const layer = card.layers.find(item => item.id === layerId);
+    if (!layer) return true;
+    layer.info = normalizeLayerInfo(layer.info);
+    const infoSection = layer.info[section];
+    if (target.type === 'checkbox') {
+        if (typeof infoSection[key] === 'boolean') {
+            infoSection[key] = target.checked;
+            const waterGroup = target.closest('.water-input-group');
+            if (waterGroup) {
+                waterGroup.classList.toggle('is-disabled', !target.checked);
+                waterGroup.querySelectorAll('input:not([type="checkbox"])').forEach(input => {
+                    input.disabled = !target.checked;
+                });
+                if (section === 'water' && key === 'groundwaterActive' && target.checked) {
+                    ['groundwaterFrom', 'groundwaterTo'].forEach(waterKey => {
+                        const input = waterGroup.querySelector(`[data-layer-info-key="${waterKey}"]`);
+                        if (input && Number.isFinite(parseWaterElevation(input.value))) {
+                            infoSection[waterKey] = input.value;
+                        }
+                    });
+                }
+                updateGroundwaterToggleAvailability();
+            }
+            const toggleGroup = target.closest('.layer-info-feature-group, .layer-info-description-group, .layer-info-iso-option, .layer-info-shear-group, .layer-info-grain-size-group, .layer-info-atterberg-group, .layer-info-plasticity-class-group, .layer-info-settlement-group, .layer-info-compactability-group, .layer-info-additional-values-group, .layer-info-color-palette-group');
+            if (toggleGroup) {
+                toggleGroup.classList.toggle('is-disabled', !target.checked);
+                toggleGroup.querySelectorAll('select, input:not([type="checkbox"]), input[type="checkbox"][data-layer-info-key]:not([data-layer-info-key$="Active"]), button').forEach(input => {
+                    input.disabled = !target.checked;
+                });
+            }
+            const isoGroup = target.closest('.layer-info-iso-group');
+            if (section === 'lab' && key === 'isoGroupActive' && isoGroup) {
+                isoGroup.classList.toggle('is-disabled', !target.checked);
+                isoGroup.querySelectorAll('input, select').forEach(input => {
+                    if (input !== target) input.disabled = !target.checked;
+                });
+            }
+            if (section === 'lab' && key === 'atterbergLimitsActive') {
+                const indicesGroup = target.closest('.layer-info-lab-group')?.querySelector('.layer-info-plasticity-indices-group');
+                indicesGroup?.classList.toggle('is-disabled', !target.checked);
+                indicesGroup?.querySelectorAll('input').forEach(input => {
+                    input.disabled = !target.checked;
+                });
+            }
+            return true;
+        }
+        const values = infoSection[key] || [];
+        infoSection[key] = target.checked ? [...new Set([...values, target.value])] : values.filter(value => value !== target.value);
+        const choice = target.closest('.layer-info-choice');
+        choice?.querySelector('select')?.toggleAttribute('disabled', !target.checked);
+    } else if (target.dataset.layerInfoOption) {
+        infoSection[key][target.dataset.layerInfoOption] = target.value;
+    } else {
+        infoSection[key] = target.value;
+        if (section === 'water' && (key.endsWith('From') || key.endsWith('To'))) {
+            const companionKey = key.endsWith('From') ? `${key.slice(0, -4)}To` : `${key.slice(0, -2)}From`;
+            const companionValue = parseWaterElevation(infoSection[companionKey]);
+            const value = parseWaterElevation(target.value);
+            if (key.endsWith('From') && Number.isFinite(companionValue) && value < companionValue) {
+                infoSection[key] = formatWaterElevation(companionValue);
+                target.value = formatWaterElevation(companionValue);
+            } else if (key.endsWith('To') && Number.isFinite(companionValue) && value > companionValue) {
+                infoSection[key] = formatWaterElevation(companionValue);
+                target.value = formatWaterElevation(companionValue);
+            }
+        }
+    }
+    if (section === 'lab') updateLayerLabCalculations(layer);
+    if (section === 'water') updateGroundwaterToggleAvailability();
+    if (section === 'lab' && ['sand', 'silt', 'clay', 'gravel'].includes(key)) updateGrainSizeValidity(document.getElementById(layer.id));
+    if (section === 'lab' && ['liquidLimit', 'plasticLimit', 'waterContent'].includes(key)) {
+        const layerElement = document.getElementById(layer.id);
+        ['plasticityIndex', 'consistencyIndex'].forEach(calculatedKey => {
+            const calculatedInput = layerElement?.querySelector(`[data-layer-info-section="lab"][data-layer-info-key="${calculatedKey}"]`);
+            if (calculatedInput) calculatedInput.value = layer.info.lab[calculatedKey];
+        });
+    }
+    return true;
+}
+
+function handleLayerInfoToggleClick(target) {
+    const toggle = target.closest('.layer-info-toggle');
+    if (!toggle) return false;
+    const layerElement = toggle.closest('.card-layer');
+    const panel = layerElement?.querySelector(`[data-layer-info-panel-content="${toggle.dataset.layerInfoPanel}"]`);
+    if (!panel) return true;
+    const shouldOpen = panel.hidden;
+    layerElement.querySelectorAll('.layer-info-panel').forEach(infoPanel => {
+        if (infoPanel !== panel) infoPanel.hidden = true;
+    });
+    layerElement.querySelectorAll('.layer-info-toggle').forEach(infoToggle => {
+        if (infoToggle !== toggle) {
+            infoToggle.classList.remove('is-active');
+            infoToggle.setAttribute('aria-expanded', 'false');
+        }
+    });
+    panel.hidden = !shouldOpen;
+    toggle.classList.toggle('is-active', shouldOpen);
+    toggle.setAttribute('aria-expanded', String(shouldOpen));
     return true;
 }
 
@@ -2460,14 +2748,16 @@ gridContent.addEventListener('input', function(event) {
 
     handleCoordinateDraftInput(target);
 
-    const cardId = target.dataset.cardId;
+    const layerElement = target.closest('.card-layer');
+    const cardId = target.dataset.cardId || layerElement?.dataset.cardId;
     const card = cardsData.find(c => c.id === cardId);
     if (!card) return;
 
     handleCardMetaInput(target, card);
 
-    const layerId = target.dataset.layerId;
+    const layerId = target.dataset.layerId || layerElement?.id;
     if (handleLayerColorInput(target, card, cardId, layerId)) return;
+    if (handleLayerInfoInput(target, card, layerId)) return;
     handleLayerDataInput(target, card, layerId);
 });
 
@@ -2476,6 +2766,34 @@ gridContent.addEventListener('input', function(event) {
 function handleFinalLayerColorChange(target) {
     if (!target.classList.contains('layer-color-picker')) return false;
     triggerVisualisationUpdate();
+    return true;
+}
+
+function handleLayerHeightCommit(target) {
+    if (target.name !== 'layerheight') return false;
+    const card = cardsData.find(item => item.id === target.dataset.cardId);
+    if (card) refreshWaterFaderControls(card);
+    triggerVisualisationUpdate();
+    return true;
+}
+
+function handleLayerNameCommit(target) {
+    if (target.name !== 'layername') return false;
+    triggerVisualisationUpdate();
+    return true;
+}
+
+function handleGokCommit(target) {
+    if (target.name !== 'nhn') return false;
+    const card = cardsData.find(item => item.id === target.dataset.cardId);
+    if (card) refreshWaterFaderControls(card);
+    triggerVisualisationUpdate();
+    return true;
+}
+
+function handleWaterInfoCommit(target) {
+    if (target.dataset.layerInfoSection !== 'water') return false;
+    triggerVisualisationUpdate({ updateCharts: false });
     return true;
 }
 
@@ -2517,6 +2835,10 @@ function handleDashboardIfcEpsgChange(target) {
 gridContent.addEventListener('change', function(event) {
     const target = event.target;
     if (handleFinalLayerColorChange(target)) return;
+    if (handleLayerHeightCommit(target)) return;
+    if (handleLayerNameCommit(target)) return;
+    if (handleGokCommit(target)) return;
+    if (handleWaterInfoCommit(target)) return;
     if (handleCoordinateCommitChange(target)) return;
     if (handleCardEpsgChange(target)) return;
     handleDashboardIfcEpsgChange(target);
@@ -2733,7 +3055,7 @@ async function performIfcExport() {
     };
 
     const initialSnapshot = getIfcExportSnapshot();
-    console.log('performIfcExport: started', {
+    debugLog('performIfcExport: started', {
         ifcMeshesLength: getSnapshotMeshCount(),
         snapshotSource: initialSnapshot ? initialSnapshot.source : 'missing'
     });
@@ -2742,7 +3064,7 @@ async function performIfcExport() {
     try {
         // If IFC meshes are not yet present, trigger visualisation build and wait briefly
         if (getSnapshotMeshCount() === 0) {
-            console.log('performIfcExport: no ifcMeshes found, triggering visualisation build');
+            debugLog('performIfcExport: no ifcMeshes found, triggering visualisation build');
             try {
                 triggerVisualisationUpdate();
             } catch (e) {
@@ -2757,7 +3079,7 @@ async function performIfcExport() {
                 // eslint-disable-next-line no-await-in-loop
                 await new Promise(r => setTimeout(r, 150));
             }
-            console.log('performIfcExport: wait complete, ifcMeshesLength now', getSnapshotMeshCount());
+            debugLog('performIfcExport: wait complete, ifcMeshesLength now', getSnapshotMeshCount());
             if (getSnapshotMeshCount() === 0) {
                 alert('Keine IFC-Geometrien verfügbar. Bitte zuerst die Visualisierung laden oder warte einen Moment.');
                 return;
@@ -2771,12 +3093,12 @@ async function performIfcExport() {
         ]);
         const { generateIFCFaceSet, generateIFCBoxSet, resetIfcEntityId, getNextIfcEntityId } = ifcModule;
         const { buildIfcExport, createIfcDocumentHeader, appendIfcDocumentFooter } = ifcBuilderModule;
-        console.log('performIfcExport: ifc modules imported');
+        debugLog('performIfcExport: ifc modules imported');
         resetIfcEntityId(); // Reset IFC entity IDs
         let fullIFC = createIfcDocumentHeader();
         const exportContext = createIfcExportContext();
         // buildIfcExport may be CPU/memory heavy for large datasets; log progress
-        console.log('performIfcExport: calling buildIfcExport', {
+        debugLog('performIfcExport: calling buildIfcExport', {
             boreholes: exportContext.cardsData.length,
             snapshotSource: exportContext.snapshotSource
         });
@@ -2796,7 +3118,7 @@ async function performIfcExport() {
 
         if (navigator.msSaveBlob) {
             navigator.msSaveBlob(blob, fileName);
-            console.log('performIfcExport: msSaveBlob fallback used');
+            debugLog('performIfcExport: msSaveBlob fallback used');
         } else {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -2812,7 +3134,7 @@ async function performIfcExport() {
             document.body.removeChild(a);
             setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
-        console.log('performIfcExport: finished and download triggered', { fileName });
+        debugLog('performIfcExport: finished and download triggered', { fileName });
         showIfcDownloadOverlay();
     } catch (err) {
         console.error('IFC export failed:', err);
@@ -2828,7 +3150,7 @@ document.addEventListener('click', (e) => {
     try {
         const target = e.target;
         if (target && (target.id === 'btn-toggle-elements' || (target.closest && target.closest('#btn-toggle-elements')))) {
-            console.log('btn-toggle-elements clicked (delegated)');
+            debugLog('btn-toggle-elements clicked (delegated)');
             performIfcExport();
         }
     } catch (err) {

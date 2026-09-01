@@ -1,4 +1,4 @@
-﻿/**
+/**
  * IFC Export Helper Module für Geometrien aus Three.js-Szene
  * 
  * Verarbeitet Three.js Geometrien für IFC-Export mit korrekter Georeferenzierung:
@@ -12,6 +12,8 @@
  * - IFC/Voronoi: X (rechts), Y (vorne), Z (oben)
  * - Transformation: [x_three, z_three, -y_three] → [x_ifc, y_ifc, z_ifc]
  */
+
+const debugLog = () => {};
 
 let nextIfcEntityId = 42;
 
@@ -35,10 +37,10 @@ function analyzeGeometry(mesh) {
   const posCount = geometry.attributes.position.count;
   const indexCount = geometry.index ? geometry.index.count : 0;
   
-  console.log(`[GEOMETRY ANALYSIS - ${mesh.userData?.layerName || 'Unknown'}]`);
-  console.log(`  Position Vertices in array: ${posCount}`);
-  console.log(`  Index Count (Faces × 3 für Dreiecke): ${indexCount}`);
-  console.log(`  Dreiecke: ${indexCount / 3}`);
+  debugLog(`[GEOMETRY ANALYSIS - ${mesh.userData?.layerName || 'Unknown'}]`);
+  debugLog(`  Position Vertices in array: ${posCount}`);
+  debugLog(`  Index Count (Faces × 3 für Dreiecke): ${indexCount}`);
+  debugLog(`  Dreiecke: ${indexCount / 3}`);
   
   const uniqueVertices = new Set();
   const positions = geometry.attributes.position;
@@ -46,8 +48,8 @@ function analyzeGeometry(mesh) {
     const key = `${positions.getX(i).toFixed(5)},${positions.getY(i).toFixed(5)},${positions.getZ(i).toFixed(5)}`;
     uniqueVertices.add(key);
   }
-  console.log(`  Tatsächlich eindeutige Koordinaten: ${uniqueVertices.size}`);
-  console.log(`  Duplikate: ${posCount - uniqueVertices.size} (für Normalen/Texturen)`);
+  debugLog(`  Tatsächlich eindeutige Koordinaten: ${uniqueVertices.size}`);
+  debugLog(`  Duplikate: ${posCount - uniqueVertices.size} (für Normalen/Texturen)`);
 }
 */
 
@@ -180,10 +182,10 @@ export function generateIFCFaceSet(mesh, origin = { x: 0, y: 0, z: 0 }) {
 
   // Logging für Verifikation
   /*
-  console.log(`[IFC FACESET] Layer: ${mesh.userData?.layerName || 'Unknown'}`);
-  console.log(`  Eindeutige Vertices: ${uniqueVertices.length}`);
-  console.log(`  Faces/Dreiecke: ${faces.length}`);
-  console.log(`  Origin (Georeferenz): (${origin.x.toFixed(2)}, ${origin.y.toFixed(2)}, ${origin.z.toFixed(2)})`);
+  debugLog(`[IFC FACESET] Layer: ${mesh.userData?.layerName || 'Unknown'}`);
+  debugLog(`  Eindeutige Vertices: ${uniqueVertices.length}`);
+  debugLog(`  Faces/Dreiecke: ${faces.length}`);
+  debugLog(`  Origin (Georeferenz): (${origin.x.toFixed(2)}, ${origin.y.toFixed(2)}, ${origin.z.toFixed(2)})`);
   */
 
   return { vertices: uniqueVertices, faces, ifcOutput, faceSetId };
@@ -303,8 +305,8 @@ export function generateIFCBoxSet(boreholes, referenceBorehole = boreholes[0], l
   });
 
 /*
-  console.log(`[IFC BOX SET] Bohrungen: ${boreholes.length}, Einzelgeometrien: ${ifcGeometries.length}`);
-  console.log(`  Referenzpunkt: (${refLat.toFixed(6)}, ${refLon.toFixed(6)}, ${refNhn.toFixed(2)})`);
+  debugLog(`[IFC BOX SET] Bohrungen: ${boreholes.length}, Einzelgeometrien: ${ifcGeometries.length}`);
+  debugLog(`  Referenzpunkt: (${refLat.toFixed(6)}, ${refLon.toFixed(6)}, ${refNhn.toFixed(2)})`);
 */
 
   return ifcGeometries;

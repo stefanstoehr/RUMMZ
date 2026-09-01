@@ -1,3 +1,5 @@
+const debugLog = () => {};
+
 function decimalDegreesToIfcDMS(decimal) {
     const sign = Math.sign(decimal) >= 0 ? 1 : -1;
     const absValue = Math.abs(decimal);
@@ -161,12 +163,12 @@ export function buildIfcExport(config) {
         .map(mesh => [`${mesh.userData.boreholeIndex}-${mesh.userData.layerIndex}`, mesh])
     );
 
-    console.log('buildIfcExport: start', { selectedEpsg, boreholes: cardsDataForExport.length, faceMeshes: faceMeshes.length });
+    debugLog('buildIfcExport: start', { selectedEpsg, boreholes: cardsDataForExport.length, faceMeshes: faceMeshes.length });
     const _buildIfc_start = (typeof performance !== 'undefined') ? performance.now() : Date.now();
     let _processedBoreholes = 0;
 
     cardsDataForExport.forEach((borehole, boreholeIndex) => {
-        if (boreholeIndex % 5 === 0 || boreholeIndex < 3) console.log(`buildIfcExport: processing borehole ${boreholeIndex + 1}/${cardsDataForExport.length}`);
+        if (boreholeIndex % 5 === 0 || boreholeIndex < 3) debugLog(`buildIfcExport: processing borehole ${boreholeIndex + 1}/${cardsDataForExport.length}`);
         try {
             const siteId = getNextIfcEntityId();
             const relAggId = getNextIfcEntityId();
@@ -296,7 +298,7 @@ export function buildIfcExport(config) {
     });
 
     const _buildIfc_end = (typeof performance !== 'undefined') ? performance.now() : Date.now();
-    console.log(`buildIfcExport: completed in ${(_buildIfc_end - _buildIfc_start).toFixed(1)} ms, processed ${_processedBoreholes} boreholes, ifc length ${nextIFC.length}`);
+    debugLog(`buildIfcExport: completed in ${(_buildIfc_end - _buildIfc_start).toFixed(1)} ms, processed ${_processedBoreholes} boreholes, ifc length ${nextIFC.length}`);
 
     return nextIFC;
 }

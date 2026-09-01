@@ -51,8 +51,40 @@ function normalizeImportedLayer(cardId, layer, layerIndex) {
         id: typeof layer?.id === 'string' && layer.id.trim() ? layer.id : fallbackLayer.id,
         name: typeof layer?.name === 'string' ? layer.name : '',
         height: Number.isFinite(parsedHeight) ? parsedHeight : null,
-        color: typeof layer?.color === 'string' && layer.color.trim() ? layer.color : fallbackLayer.color
+        color: typeof layer?.color === 'string' && layer.color.trim() ? layer.color : fallbackLayer.color,
+        info: typeof normalizeLayerInfo === 'function' ? normalizeLayerInfo(layer?.info) : fallbackLayer.info
     };
+}
+
+function normalizeImportedWaterElevation(value) {
+    const parsed = typeof value === 'string'
+        ? Number(value.trim().replace(',', '.'))
+        : Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatImportedWaterElevation(value) {
+    return Number(value).toFixed(2).replace('.', ',');
+}
+
+function hydrateImportedGroundwaterDefaults(layers, nhn) {
+    if (!Number.isFinite(nhn)) return;
+
+    let layerTop = nhn;
+    layers.forEach(layer => {
+        const layerHeight = Number(layer?.height) / 100;
+        const layerBottom = Number.isFinite(layerHeight) && layerHeight > 0 ? layerTop - layerHeight : layerTop;
+        const water = layer?.info?.water;
+        if (water?.groundwaterActive === true) {
+            if (!Number.isFinite(normalizeImportedWaterElevation(water.groundwaterFrom))) {
+                water.groundwaterFrom = formatImportedWaterElevation(layerTop);
+            }
+            if (!Number.isFinite(normalizeImportedWaterElevation(water.groundwaterTo))) {
+                water.groundwaterTo = formatImportedWaterElevation(layerBottom);
+            }
+        }
+        layerTop = layerBottom;
+    });
 }
 
 function normalizeImportedCard(card, index) {
@@ -65,14 +97,18 @@ function normalizeImportedCard(card, index) {
         : Number(card?.nhn);
     const rawLayers = Array.isArray(card?.layers) && card.layers.length > 0 ? card.layers : [null];
 
+    const nhn = Number.isFinite(parsedNhn) ? parsedNhn : null;
+    const layers = rawLayers.map((layer, layerIndex) => normalizeImportedLayer(normalizedCardId, layer, layerIndex));
+    hydrateImportedGroundwaterDefaults(layers, nhn);
+
     return {
         ...fallbackCard,
         id: normalizedCardId,
         title: typeof card?.title === 'string' ? card.title : '',
         coords: normalizeImportedCoords(card?.coords),
         epsg: normalizedEpsg,
-        nhn: Number.isFinite(parsedNhn) ? parsedNhn : null,
-        layers: rawLayers.map((layer, layerIndex) => normalizeImportedLayer(normalizedCardId, layer, layerIndex))
+        nhn,
+        layers
     };
 }
 
@@ -124,6 +160,7 @@ function importProjectFromJSON(file) {
 
                 projectTitle = normalizedProject.title;
                 cardsData = normalizedProject.boreholes;
+                window.groundwaterVisible = false;
 
                 resetImportedProjectState();
                 initialRender();
