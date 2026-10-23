@@ -9,7 +9,7 @@ Preisträger 12/2025 – Dr. Stefan Weiße Stiftung, Dresden
 
 ![Status](https://img.shields.io/badge/Status-MVP-orange)
 ![Build](https://img.shields.io/badge/Build-Static%20WebApp-green)
-![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-blue)
+![License](https://img.shields.io/badge/License-CC%20BY%204.0-blue)
 ![Privacy](https://img.shields.io/badge/Data%20Storage-Local%20Only-9cf)
 
 ![WebGL](https://img.shields.io/badge/WebGL-Enabled-red)
@@ -152,4 +152,4 @@ Universitätsstraße 22
 ---
 
 ## 🏷️ Lizenz
-*CC BY NC 4.0*
+Die von Stefan Stoehr geschaffenen Originalbestandteile dieses Projekts stehen unter [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de). Drittanbieter-Komponenten unterliegen ihren jeweiligen Lizenzen; Details stehen in [LICENSE.md](LICENSE.md).

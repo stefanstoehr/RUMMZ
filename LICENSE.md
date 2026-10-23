@@ -1,28 +1,13 @@
-# Creative Commons Attribution–NonCommercial 4.0 International (CC BY-NC 4.0)
+# Creative Commons Attribution 4.0 International (CC BY 4.0)
 
 Copyright © 2026 Stefan Stoehr
 
-Dieses Werk – einschließlich Design, Layout, Benutzeroberfläche, Texte, Grafiken, Dokumentation und sonstiger Inhalte – ist lizenziert unter der **Creative Commons Attribution–NonCommercial 4.0 International License (CC BY-NC 4.0)**.
+Die von Stefan Stoehr geschaffenen Originalbestandteile dieses Projekts – einschließlich Design, Layout, Benutzeroberfläche, Texte, Grafiken und Quellcode – sind unter der **Creative Commons Namensnennung 4.0 International Lizenz (CC BY 4.0)** lizenziert.
 
-## ✔️ Du darfst
-- **Teilen** — das Werk kopieren und verbreiten  
-- **Anpassen** — das Werk remixen, verändern und darauf aufbauen  
+Du darfst das Material teilen und bearbeiten, auch kommerziell, sofern du angemessene Urheber- und Rechteangaben machst, auf die Lizenz verlinkst und Änderungen kenntlich machst. Du darfst keine zusätzlichen Einschränkungen anwenden, die anderen die durch die Lizenz erlaubten Handlungen untersagen.
 
-## Unter den folgenden Bedingungen
-- **Namensnennung (BY)**  
-  Du musst angemessene Urheber- und Rechteangaben machen.
+Diese Lizenz gilt nicht für Inhalte oder Komponenten Dritter, die im Projekt enthalten oder eingebunden sind. Für diese gelten die jeweiligen Rechte und Lizenzbedingungen ihrer Rechteinhaber.
 
-- **Nicht kommerziell (NC)**  
-  Du darfst das Material **nicht für kommerzielle Zwecke** nutzen.
+Der vollständige Lizenztext ist verfügbar unter:
 
-## ❗ Keine weiteren Einschränkungen
-Es werden keine zusätzlichen Einschränkungen gemacht, die über die Lizenz hinausgehen.
-
-## 📘 Lizenztext
-Eine vollständige Kopie der Lizenz findest du unter:  
-https://creativecommons.org/licenses/by-nc/4.0/
-
----
-
-## 💡 Zusatz
-Der Quellcode dieser Anwendung ist ausschließlich zur Einsicht und nicht zur kommerziellen Nutzung freigegeben.
+https://creativecommons.org/licenses/by/4.0/legalcode.de
