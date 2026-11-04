@@ -128,17 +128,9 @@ RUMMZ bietet:
 **Stefan Stoehr, M.A., B.Sc.**  
 buildingSMART Professional Certification – Foundation (VDI/bS-MT 2552 8.1.)  
 
-Mit freundlicher Unterstützung durch:
-
 Brandenburgische Technische Universität Cottbus-Senftenberg (BTU)
 
-Lehrstuhl für Produktionswirtschaft<br>
-Forschungszentrum (FZ) 3H, Labor 1.07<br>
 Konrad-Wachsmann-Allee 13
-
-Fachgebiet Werkzeugmaschinen<br>
-Mehrzweckgebäude (MZG), Raum 219<br>
-Universitätsstraße 22
 
 03046 Cottbus  
 
