@@ -30,6 +30,7 @@ const debugLog = () => {};
 const defaultVisualControls = {
     boreholeDiameter: 0,
     transparency: 0,
+    mapTransparency: 0,
     boundingbox: 0,
     layerThickness: 0,
     layerSpacing: 0
@@ -45,6 +46,12 @@ const visualControlConfig = {
         format: (value) => `x${multiplierSequence[value] ?? 1}`
     },
     transparency: {
+        min: 0,
+        max: 100,
+        step: 1,
+        format: (value) => `${value}%`
+    },
+    mapTransparency: {
         min: 0,
         max: 100,
         step: 1,
@@ -731,6 +738,7 @@ function bindDashboardFaderControls(faderSection) {
     const controlBindings = [
         { id: 'fader-borehole-diameter', control: 'boreholeDiameter' },
         { id: 'fader-transparency', control: 'transparency' },
+        { id: 'fader-map-transparency', control: 'mapTransparency' },
         { id: 'fader-boundingbox', control: 'boundingbox' },
         { id: 'fader-layer-thickness', control: 'layerThickness' },
         { id: 'fader-layer-spacing', control: 'layerSpacing' }
@@ -2063,10 +2071,17 @@ ${getEpsgSelectOptions(dashboardSelectedEPSG)}
                 </div>
             </div>
             <div class="location-input-group">
-                <label for="fader-transparency">Transparenz</label>
+                <label for="fader-transparency">Schichttransparenz</label>
                 <div class="fader-control-row">
                     <input type="range" id="fader-transparency" name="fader-transparency">
                     <span class="fader-value" data-fader-value-for="fader-transparency">0%</span>
+                </div>
+            </div>
+            <div class="location-input-group">
+                <label for="fader-map-transparency">Kartentransparenz</label>
+                <div class="fader-control-row">
+                    <input type="range" id="fader-map-transparency" name="fader-map-transparency">
+                    <span class="fader-value" data-fader-value-for="fader-map-transparency">0%</span>
                 </div>
             </div>
             <div class="location-input-group">

@@ -250,6 +250,7 @@ function getVisualControls() {
   const boreholeDiameterIndex = clampRange(controls.boreholeDiameter, 0, multiplierSequence.length - 1, 0);
   const boreholeDiameterMultiplier = multiplierSequence[boreholeDiameterIndex] || 1;
   const transparencyPercent = clampRange(controls.transparency, 0, 100, 0);
+  const mapTransparencyPercent = clampRange(controls.mapTransparency, 0, 100, 0);
   const boundingboxPercent = clampRange(controls.boundingbox, 0, 100, 0);
   const layerThicknessIndex = clampRange(controls.layerThickness, 0, multiplierSequence.length - 1, 0);
   const layerThicknessMultiplier = multiplierSequence[layerThicknessIndex] || 1;
@@ -259,6 +260,7 @@ function getVisualControls() {
   return {
     boreholeDiameterM: 0.08 * boreholeDiameterMultiplier,
     opacity: Math.max(0, 1 - (transparencyPercent / 100)),
+    mapOpacity: Math.max(0, 1 - (mapTransparencyPercent / 100)),
     boundingBoxScale: 2 - (boundingboxPercent / 100),
     layerHeightScale: layerThicknessMultiplier,
     layerSpacingM,
@@ -281,8 +283,8 @@ function tileToLat(y, zoom) {
   return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
-// Stitches OSM raster tiles covering the grid's bounding box and drapes them as a plane over the grid, toggled by the "Topografie" icon.
-async function buildTopographyOverlay(scene, gridSize, centerX, centerZ, midNHN, refLat, refLon, metersPerDegLat, metersPerDegLon) {
+// Stitches OSM raster tiles and drapes them over the DGM terrain mesh, toggled by the "Topografie" icon.
+async function buildTopographyOverlay(scene, terrainGeometry, gridSize, centerX, centerZ, mapOpacity, refLat, refLon, metersPerDegLat, metersPerDegLon) {
   const topographyGroup = new THREE.Group();
   topographyGroup.name = 'topography-overlay';
   topographyGroup.visible = window.topographyVisible === true;
@@ -359,12 +361,16 @@ async function buildTopographyOverlay(scene, gridSize, centerX, centerZ, midNHN,
     const texture = new THREE.CanvasTexture(cropCanvas);
     texture.colorSpace = THREE.SRGBColorSpace;
 
-    const geometry = new THREE.PlaneGeometry(gridSize, gridSize);
-    geometry.rotateX(-Math.PI / 2);
-    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(centerX, midNHN + 0.001, centerZ); // small offset so it sits on top of the grid without z-fighting
-    mesh.renderOrder = -1;
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: mapOpacity,
+      alphaTest: 0.01,
+      depthWrite: true,
+      side: THREE.DoubleSide
+    });
+    const mesh = new THREE.Mesh(terrainGeometry, material);
+    mesh.renderOrder = 1;
     topographyGroup.add(mesh);
   } catch (err) {
     console.warn('Topografie-Overlay konnte nicht geladen werden:', err);
@@ -400,6 +406,7 @@ function updateVisualisation(cardsData, shouldUpdateCharts = true) {
   const visualControls = getVisualControls();
   const boreholeRadius = visualControls.boreholeDiameterM / 2;
   const spreadOpacity = visualControls.opacity;
+  const mapOpacity = visualControls.mapOpacity;
   const boundingBoxScale = visualControls.boundingBoxScale;
   const layerHeightScale = visualControls.layerHeightScale;
   const layerSpacingM = visualControls.layerSpacingM;
@@ -794,8 +801,6 @@ function updateVisualisation(cardsData, shouldUpdateCharts = true) {
   scene.add(gridHelper);
   //geometryCache.push(gridHelper); // Grid zum Cache hinzufügen
 
-  buildTopographyOverlay(scene, gridSize, centerX, centerZ, midNHN, refLat, refLon, metersPerDegLat, metersPerDegLon);
-
   // Kamera automatisch zentrieren und skalieren
   const maxExtent = Math.max(maxX - minX, maxZ - minZ);
   const minDistance = 30;
@@ -915,6 +920,31 @@ function updateVisualisation(cardsData, shouldUpdateCharts = true) {
   ];
   const tinDelaunay = Delaunay.from(tinPoints);
   const triangleCount = tinDelaunay.triangles.length / 3;
+  const terrainPositions = [];
+  const terrainUvs = [];
+  for (let t = 0; t < triangleCount; t++) {
+    const triangleIndices = [
+      tinDelaunay.triangles[t * 3],
+      tinDelaunay.triangles[t * 3 + 1],
+      tinDelaunay.triangles[t * 3 + 2]
+    ];
+    if (triangleIndices.some(index => index >= tinPoints.length)) continue;
+
+    triangleIndices.forEach(index => {
+      const [x, z] = tinPoints[index];
+      terrainPositions.push(x, tinElevations[index] + 0.02, z);
+      terrainUvs.push(
+        (x - gridMinX) / gridSize,
+        1 - (z - gridMinZ) / gridSize
+      );
+    });
+  }
+  const terrainGeometry = new THREE.BufferGeometry();
+  terrainGeometry.setAttribute('position', new THREE.Float32BufferAttribute(terrainPositions, 3));
+  terrainGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(terrainUvs, 2));
+  terrainGeometry.computeVertexNormals();
+  buildTopographyOverlay(scene, terrainGeometry, gridSize, centerX, centerZ, mapOpacity, refLat, refLon, metersPerDegLat, metersPerDegLon);
+
   const voronoi = Delaunay.from(boreholePoints).voronoi([gridMinX, gridMinZ, gridMaxX, gridMaxZ]);
   debugLog("Voronoi cells:", voronoi.cellPolygons());
 

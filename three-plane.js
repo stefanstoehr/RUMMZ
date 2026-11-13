@@ -253,6 +253,7 @@ function getVisualControls() {
   const boreholeDiameterIndex = clampRange(controls.boreholeDiameter, 0, multiplierSequence.length - 1, 0);
   const boreholeDiameterMultiplier = multiplierSequence[boreholeDiameterIndex] || 1;
   const transparencyPercent = clampRange(controls.transparency, 0, 100, 0);
+  const mapTransparencyPercent = clampRange(controls.mapTransparency, 0, 100, 0);
   const boundingboxPercent = clampRange(controls.boundingbox, 0, 100, 0);
   const layerThicknessIndex = clampRange(controls.layerThickness, 0, multiplierSequence.length - 1, 0);
   const layerThicknessMultiplier = multiplierSequence[layerThicknessIndex] || 1;
@@ -262,6 +263,7 @@ function getVisualControls() {
   return {
     boreholeDiameterM: 0.08 * boreholeDiameterMultiplier,
     opacity: Math.max(0, 1 - (transparencyPercent / 100)),
+    mapOpacity: Math.max(0, 1 - (mapTransparencyPercent / 100)),
     boundingBoxScale: 2 - (boundingboxPercent / 100),
     layerHeightScale: layerThicknessMultiplier,
     layerSpacingM,
@@ -285,7 +287,7 @@ function tileToLat(y, zoom) {
 }
 
 // Stitches OSM raster tiles covering the grid's bounding box and drapes them as a plane over the grid, toggled by the "Topografie" icon.
-async function buildTopographyOverlay(scene, gridSize, centerX, centerZ, midNHN, refLat, refLon, metersPerDegLat, metersPerDegLon) {
+async function buildTopographyOverlay(scene, gridSize, centerX, centerZ, highestNHN, mapOpacity, refLat, refLon, metersPerDegLat, metersPerDegLon) {
   const topographyGroup = new THREE.Group();
   topographyGroup.name = 'topography-overlay';
   topographyGroup.visible = window.topographyVisible === true;
@@ -364,10 +366,16 @@ async function buildTopographyOverlay(scene, gridSize, centerX, centerZ, midNHN,
 
     const geometry = new THREE.PlaneGeometry(gridSize, gridSize);
     geometry.rotateX(-Math.PI / 2);
-    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false });
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      opacity: mapOpacity,
+      alphaTest: 0.01,
+      depthWrite: true
+    });
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(centerX, midNHN + 0.001, centerZ); // small offset so it sits on top of the grid without z-fighting
-    mesh.renderOrder = -1;
+    mesh.position.set(centerX, highestNHN + 0.1, centerZ);
+    mesh.renderOrder = 1;
     topographyGroup.add(mesh);
   } catch (err) {
     console.warn('Topografie-Overlay konnte nicht geladen werden:', err);
@@ -403,6 +411,7 @@ function updateVisualisation(cardsData, shouldUpdateCharts = true) {
   const visualControls = getVisualControls();
   const boreholeRadius = visualControls.boreholeDiameterM / 2;
   const spreadOpacity = visualControls.opacity;
+  const mapOpacity = visualControls.mapOpacity;
   const boundingBoxScale = visualControls.boundingBoxScale;
   const layerHeightScale = visualControls.layerHeightScale;
   const layerSpacingM = visualControls.layerSpacingM;
@@ -797,7 +806,7 @@ function updateVisualisation(cardsData, shouldUpdateCharts = true) {
   scene.add(gridHelper);
   //geometryCache.push(gridHelper); // Grid zum Cache hinzufügen
 
-  buildTopographyOverlay(scene, gridSize, centerX, centerZ, midNHN, refLat, refLon, metersPerDegLat, metersPerDegLon);
+  buildTopographyOverlay(scene, gridSize, centerX, centerZ, highestNHN, mapOpacity, refLat, refLon, metersPerDegLat, metersPerDegLon);
 
   // Kamera automatisch zentrieren und skalieren
   const maxExtent = Math.max(maxX - minX, maxZ - minZ);
