@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Delaunay } from 'd3-delaunay';
 import { updateCharts } from './chart.js';
+import './three-water-dgm.js';
 
 const debugLog = () => {};
 
