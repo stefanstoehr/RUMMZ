@@ -286,8 +286,8 @@ function tileToLat(y, zoom) {
   return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
-// Stitches OSM raster tiles covering the grid's bounding box and drapes them as a plane over the grid, toggled by the "Topografie" icon.
-async function buildTopographyOverlay(scene, gridSize, centerX, centerZ, highestNHN, mapOpacity, refLat, refLon, metersPerDegLat, metersPerDegLon) {
+// Stitches OSM raster tiles and maps the topography onto each cell's uppermost volume face.
+async function buildTopographyOverlay(scene, gridSize, mapOpacity, refLat, refLon, metersPerDegLat, metersPerDegLon, cells, layerExplodeScaleXZ) {
   const topographyGroup = new THREE.Group();
   topographyGroup.name = 'topography-overlay';
   topographyGroup.visible = window.topographyVisible === true;
@@ -364,19 +364,42 @@ async function buildTopographyOverlay(scene, gridSize, centerX, centerZ, highest
     const texture = new THREE.CanvasTexture(cropCanvas);
     texture.colorSpace = THREE.SRGBColorSpace;
 
-    const geometry = new THREE.PlaneGeometry(gridSize, gridSize);
-    geometry.rotateX(-Math.PI / 2);
-    const material = new THREE.MeshBasicMaterial({
-      map: texture,
-      transparent: true,
-      opacity: mapOpacity,
-      alphaTest: 0.01,
-      depthWrite: true
+    cells.forEach(cell => {
+      const shape = new THREE.Shape();
+      cell.polygon.forEach(([x, z], index) => {
+        if (index === 0) shape.moveTo(x, -z);
+        else shape.lineTo(x, -z);
+      });
+      shape.closePath();
+
+      const geometry = new THREE.ShapeGeometry(shape);
+      geometry.rotateX(-Math.PI / 2);
+      const positions = geometry.getAttribute('position');
+      const uvs = geometry.getAttribute('uv');
+      for (let index = 0; index < positions.count; index++) {
+        const x = positions.getX(index);
+        const z = positions.getZ(index);
+        uvs.setXY(index, (x + gridSize / 2) / gridSize, (gridSize / 2 - z) / gridSize);
+      }
+      uvs.needsUpdate = true;
+
+      const material = new THREE.MeshBasicMaterial({
+        map: texture,
+        transparent: true,
+        opacity: mapOpacity,
+        alphaTest: 0.01,
+        depthWrite: true
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.set(
+        cell.centerX * (1 - layerExplodeScaleXZ),
+        cell.topY + 0.1,
+        cell.centerZ * (1 - layerExplodeScaleXZ)
+      );
+      mesh.scale.set(layerExplodeScaleXZ, 1, layerExplodeScaleXZ);
+      mesh.renderOrder = 1;
+      topographyGroup.add(mesh);
     });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(centerX, highestNHN + 0.1, centerZ);
-    mesh.renderOrder = 1;
-    topographyGroup.add(mesh);
   } catch (err) {
     console.warn('Topografie-Overlay konnte nicht geladen werden:', err);
   }
@@ -806,8 +829,6 @@ function updateVisualisation(cardsData, shouldUpdateCharts = true) {
   scene.add(gridHelper);
   //geometryCache.push(gridHelper); // Grid zum Cache hinzufügen
 
-  buildTopographyOverlay(scene, gridSize, centerX, centerZ, highestNHN, mapOpacity, refLat, refLon, metersPerDegLat, metersPerDegLon);
-
   // Kamera automatisch zentrieren und skalieren
   const maxExtent = Math.max(maxX - minX, maxZ - minZ);
   const minDistance = 30;
@@ -930,6 +951,36 @@ function updateVisualisation(cardsData, shouldUpdateCharts = true) {
 
     return cell.length >= 3 ? cell : null;
   }
+
+  const topographyCells = renderCardsData.map((borehole, index) => {
+    if (borehole.layers.length === 0) return null;
+    const polygon = normalizeCellPolygon(voronoi.cellPolygon(index));
+    if (!polygon) return null;
+
+    const center = polygon.reduce((sum, [x, z]) => ({
+      x: sum.x + x / polygon.length,
+      z: sum.z + z / polygon.length
+    }), { x: 0, z: 0 });
+
+    return {
+      polygon,
+      centerX: center.x,
+      centerZ: center.z,
+      topY: borehole.nhn
+    };
+  }).filter(Boolean);
+
+  buildTopographyOverlay(
+    scene,
+    gridSize,
+    mapOpacity,
+    refLat,
+    refLon,
+    metersPerDegLat,
+    metersPerDegLon,
+    topographyCells,
+    layerExplodeScaleXZ
+  );
 
   // CREATE MESHS
   async function buildModel() {
