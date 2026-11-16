@@ -35,6 +35,136 @@ function toIfcSafeText(value) {
     return transliterated.replace(/'/g, "''");
 }
 
+function getLayerInfoIfcProperties(info) {
+    const properties = [];
+    const sections = {
+        water: info?.water || {},
+        features: info?.features || {},
+        description: info?.description || {},
+        lab: info?.lab || {}
+    };
+
+    const addText = (name, value) => {
+        const safeValue = toIfcSafeText(value);
+        if (safeValue) properties.push({ name, type: 'IFCTEXT', value: safeValue });
+    };
+    const addReal = (name, value) => {
+        const normalized = String(value ?? '').trim().replace(',', '.');
+        if (!normalized) return;
+        const number = Number(normalized);
+        if (Number.isFinite(number)) properties.push({ name, type: 'IFCREAL', value: number });
+    };
+    const addActiveText = (section, key, activeKey, name) => {
+        if (sections[section][activeKey] === true) addText(name, sections[section][key]);
+    };
+    const addActiveReal = (section, key, activeKey, name) => {
+        if (sections[section][activeKey] === true) addReal(name, sections[section][key]);
+    };
+
+    [
+        ['groundwaterFrom', 'groundwaterActive', 'Grundwasserstand OK (m)'],
+        ['groundwaterTo', 'groundwaterActive', 'Grundwasserstand UK (m)'],
+        ['fluctuationFrom', 'fluctuationActive', 'Schwankungsbereich OK (m)'],
+        ['fluctuationTo', 'fluctuationActive', 'Schwankungsbereich UK (m)'],
+        ['capillaryFrom', 'capillaryActive', 'Kapillarwasserzone OK (m)'],
+        ['capillaryTo', 'capillaryActive', 'Kapillarwasserzone UK (m)'],
+        ['temporaryFrom', 'temporaryActive', 'Temporaere Wasserzone OK (m)'],
+        ['temporaryTo', 'temporaryActive', 'Temporaere Wasserzone UK (m)'],
+        ['saturation', 'saturationActive', 'Saettigung Sr (%)'],
+        ['porosity', 'porosityActive', 'Poroesitaet n (%)']
+    ].forEach(([key, activeKey, name]) => addActiveReal('water', key, activeKey, name));
+
+    addActiveText('features', 'mainSoil', 'mainSoilActive', 'Hauptbodenart');
+    addActiveText('features', 'mixedSoil', 'mixedSoilActive', 'Gemischboden');
+    addActiveText('features', 'grading', 'gradingActive', 'Abstufung');
+    if (sections.features.secondaryActive === true && Array.isArray(sections.features.secondary)) {
+        addText('Nebenanteile', sections.features.secondary.map(value => {
+            const strength = sections.features.secondaryStrength?.[value];
+            return strength ? `${value} (${strength})` : value;
+        }).join('; '));
+    }
+    if (sections.features.organicActive === true && Array.isArray(sections.features.organic)) {
+        addText('Organik-Zusaetze', sections.features.organic.map(value => {
+            const strength = sections.features.organicStrength?.[value];
+            return strength ? `${value} (${strength})` : value;
+        }).join('; '));
+    }
+
+    [
+        ['color', 'colorActive', 'Farbe Beschreibung'],
+        ['moisture', 'moistureActive', 'Feuchte'],
+        ['consistency', 'consistencyActive', 'Konsistenz'],
+        ['density', 'densityActive', 'Lagerung'],
+        ['grainSize', 'grainSizeActive', 'Korngroesse'],
+        ['plasticity', 'plasticityActive', 'Plastizitaet'],
+        ['structure', 'structureActive', 'Struktur'],
+        ['fabric', 'fabricActive', 'Gefuege'],
+        ['odor', 'odorActive', 'Geruch'],
+        ['inclusions', 'inclusionsActive', 'Einschluesse'],
+        ['geology', 'geologyActive', 'Geologie']
+    ].forEach(([key, activeKey, name]) => addActiveText('description', key, activeKey, name));
+
+    const lab = sections.lab;
+    if (lab.isoGroupActive === true) {
+        [
+            ['isoCoarse', 'isoCoarseActive', 'ISO-Bodengruppe Grobkoernig'],
+            ['isoMixed', 'isoMixedActive', 'ISO-Bodengruppe Gemischtkoernig'],
+            ['isoFine', 'isoFineActive', 'ISO-Bodengruppe Feinkoernig'],
+            ['isoOrganic', 'isoOrganicActive', 'ISO-Bodengruppe Organisch']
+        ].forEach(([key, activeKey, name]) => addActiveText('lab', key, activeKey, name));
+        if (lab.isoArtificialActive === true) addText('ISO-Bodengruppe Kuenstlich', 'A/FA');
+        if (lab.isoRockActive === true) addText('ISO-Bodengruppe Fels', 'FP/R');
+    }
+
+    [
+        ['sand', 'Sand (%)'],
+        ['silt', 'Schluff (%)'],
+        ['clay', 'Ton (%)'],
+        ['gravel', 'Kies (%)']
+    ].forEach(([key, name]) => addActiveReal('lab', key, 'grainSizeDistributionActive', name));
+
+    [
+        ['waterContent', 'Wassergehalt w (%)'],
+        ['liquidLimit', 'Fliessgrenze wL (%)'],
+        ['plasticLimit', 'Ausrollgrenze wP (%)'],
+        ['shrinkageLimit', 'Schrumpfgrenze wS (%)'],
+        ['plasticityIndex', 'Plastizitaetszahl IP'],
+        ['consistencyIndex', 'Konsistenzzahl IC']
+    ].forEach(([key, name]) => addActiveReal('lab', key, 'atterbergLimitsActive', name));
+
+    [
+        ['plasticityClass', 'plasticityClassActive', 'Plastizitaetsklasse'],
+        ['settlement', 'settlementActive', 'Setzungsempfindlichkeit'],
+        ['frost', 'frostActive', 'Frostempfindlichkeit'],
+        ['compactability', 'compactabilityActive', 'Verdichtbarkeit']
+    ].forEach(([key, activeKey, name]) => addActiveText('lab', key, activeKey, name));
+
+    [
+        ['organicContent', 'Glueheverlust (%)'],
+        ['dryUnitWeight', 'Trockene Wichte (kN/m3)'],
+        ['saturatedUnitWeight', 'Gesaettigte Wichte (kN/m3)'],
+        ['permeability', 'Durchlaessigkeit kf (m/s)'],
+        ['spt', 'Schlagzahl N60'],
+        ['grainDensity', 'Korndichte (g/cm3)'],
+        ['cohesionEffective', 'Effektive Kohaesion c (kN/m2)'],
+        ['cohesionUndrained', 'Undrainierte Kohaesion cu (kN/m2)'],
+        ['frictionAngle', 'Reibungswinkel phi (Grad)']
+    ].forEach(([key, name]) => addActiveReal('lab', key, 'additionalValuesActive', name));
+
+    return properties;
+}
+
+function formatIfcReal(value) {
+    const numericValue = String(value);
+    const exponentIndex = numericValue.search(/[eE]/);
+    if (exponentIndex >= 0) {
+        const mantissa = numericValue.slice(0, exponentIndex);
+        const exponent = numericValue.slice(exponentIndex + 1);
+        return `${mantissa.includes('.') ? mantissa : `${mantissa}.`}E${exponent}`;
+    }
+    return numericValue.includes('.') ? numericValue : `${numericValue}.`;
+}
+
 function generateIFCGUID(idNumber) {
     const idStr = idNumber.toString();
     const paddingNeeded = 22 - idStr.length;
@@ -189,6 +319,8 @@ export function buildIfcExport(config) {
                 const color = layer.color || '#000000';
                 const rgb = hexToRgb(color);
                 const rgbString = rgb ? `${(rgb.r / 255).toFixed(1)},${(rgb.g / 255).toFixed(1)},${(rgb.b / 255).toFixed(1)}` : '0.5,0.5,0.5';
+                const layerInfoProperties = getLayerInfoIfcProperties(layer.info);
+                const layerInfoRelatedObjectIds = [];
 
                 const styleId = getNextIfcEntityId();
                 const shadingId = getNextIfcEntityId();
@@ -212,6 +344,7 @@ export function buildIfcExport(config) {
 
                     nextIFC += `#${shapeRepId}=IFCSHAPEREPRESENTATION(#3,'Body','SurfaceModel',(#${boxFaceSetId}));\n`;
                     nextIFC += `#${geoElementId}=IFCGEOGRAPHICELEMENT('${generateIFCGUID(geoElementId)}',$,'${boreholeElementName}','${layerName}','IfcBorehole',#13,#${productDefId},$,.TERRAIN.);\n`;
+                    layerInfoRelatedObjectIds.push(geoElementId);
                     nextIFC += `#${relContainedId}=IFCRELCONTAINEDINSPATIALSTRUCTURE('${generateIFCGUID(relContainedId)}',$,$,$,(#${geoElementId}),#${siteId});\n`;
                     nextIFC += `#${productDefId}=IFCPRODUCTDEFINITIONSHAPE($,$,(#${shapeRepId}));\n`;
                     nextIFC += `#${styleItemId}=IFCSTYLEDITEM(#${boxFaceSetId},(#${styleId}),'${layerName}');\n`;
@@ -259,6 +392,7 @@ export function buildIfcExport(config) {
 
                     nextIFC += `#${shapeRepId}=IFCSHAPEREPRESENTATION(#3,'Body','SurfaceModel',(#${faceSetId}));\n`;
                     nextIFC += `#${geoElementId}=IFCGEOGRAPHICELEMENT('${generateIFCGUID(geoElementId)}',$,'${layerVolumeElementName}','${layerName}','IfcGeotechnicalStratum',#13,#${productDefId},$,.TERRAIN.);\n`;
+                    layerInfoRelatedObjectIds.push(geoElementId);
                     nextIFC += `#${relContainedId}=IFCRELCONTAINEDINSPATIALSTRUCTURE('${generateIFCGUID(relContainedId)}',$,$,$,(#${geoElementId}),#${siteId});\n`;
                     nextIFC += `#${productDefId}=IFCPRODUCTDEFINITIONSHAPE($,$,(#${shapeRepId}));\n`;
                     nextIFC += `#${styleItemId}=IFCSTYLEDITEM(#${faceSetId},(#${styleId}),'${layerName}');\n`;
@@ -288,6 +422,22 @@ export function buildIfcExport(config) {
                     nextIFC += `#${propSetId}=IFCPROPERTYSET('${generateIFCGUID(propSetId)}',$,'${layerVolumePropertySetName}',$,(${propIds.map(id => `#${id}`).join(',')}));\n`;
                     const relPropId = getNextIfcEntityId();
                     nextIFC += `#${relPropId}=IFCRELDEFINESBYPROPERTIES('${generateIFCGUID(relPropId)}',$,$,$,(#${geoElementId}),#${propSetId});\n`;
+                }
+
+                if (layerInfoProperties.length > 0 && layerInfoRelatedObjectIds.length > 0) {
+                    const propertyIds = layerInfoProperties.map(property => {
+                        const propertyId = getNextIfcEntityId();
+                        const value = property.type === 'IFCREAL'
+                            ? `IFCREAL(${formatIfcReal(property.value)})`
+                            : `IFCTEXT('${property.value}')`;
+                        nextIFC += `#${propertyId}=IFCPROPERTYSINGLEVALUE('${toIfcSafeText(property.name)}',$,${value},$);\n`;
+                        return `#${propertyId}`;
+                    });
+                    const propertySetId = getNextIfcEntityId();
+                    const relatedObjects = layerInfoRelatedObjectIds.map(id => `#${id}`).join(',');
+                    nextIFC += `#${propertySetId}=IFCPROPERTYSET('${generateIFCGUID(propertySetId)}',$,'Schichtenverzeichnis','Vom Nutzer eingegebene Schichtinformationen',(${propertyIds.join(',')}));\n`;
+                    const relPropertyId = getNextIfcEntityId();
+                    nextIFC += `#${relPropertyId}=IFCRELDEFINESBYPROPERTIES('${generateIFCGUID(relPropertyId)}',$,$,$,(${relatedObjects}),#${propertySetId});\n`;
                 }
             });
             _processedBoreholes++;
