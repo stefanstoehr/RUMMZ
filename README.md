@@ -143,5 +143,9 @@ Konrad-Wachsmann-Allee 13
 
 ---
 
-## 🏷️ Lizenz
+## 🏷️ Lizenz und Marken
 Die von Stefan Stoehr geschaffenen Originalbestandteile dieses Projekts stehen unter [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.de). Drittanbieter-Komponenten unterliegen ihren jeweiligen Lizenzen; Details stehen in [LICENSE.md](LICENSE.md).
+
+Darüber hinaus gelten Markenrechte: Der Name „RUMMZ“ sowie das zugehörige Logo und Branding sind Marken von Stefan Stoehr. Der Open-Source-Code darf genutzt, angepasst und verbreitet werden, sofern die Bedingungen von CC BY 4.0 eingehalten werden. Forks oder abgeleitete Werke dürfen jedoch nicht so wirken, als seien sie offiziell, unterstützt oder von Stefan Stoehr autorisiert. Eine Verwechslung der Marke mit dem Projekt oder einer offiziellen Version ist nicht gestattet.
+
+Weitere Details zur Marken-Nutzung finden Sie in [TRADEMARK.md](TRADEMARK.md).
